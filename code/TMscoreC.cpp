@@ -15,8 +15,8 @@ using namespace std;
 
 
 /******************************************************************
- * g++ -static -O3 -ffast-math -o TMscoreC TMscoreComplex.cpp
- * g++ -static -O3 -ffast-math -lm -o TMscoreC TMscoreComplex.cpp
+ * g++ -static -O3 -ffast-math -o TMscoreC TMscoreC.cpp
+ * g++ -static -O3 -ffast-math -lm -o TMscoreC TMscoreC.cpp
  ******************************************************************/ 
 
 const char* VERSION = "J20240712";

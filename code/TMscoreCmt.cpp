@@ -11,15 +11,25 @@
 #include <iterator>
 #include <cctype>
 #include <algorithm>
+#include <pthread.h>
+#include <thread>
+#include <mutex>
+
+#ifdef _WIN32
+#include <windows.h>
+#elif defined(__linux__) || defined(__APPLE__)
+#include <sys/sysinfo.h>
+#endif
+
 using namespace std;
 
 
 /******************************************************************
- * g++ -static -O3 -ffast-math -o TMscoreC TMscoreC.cpp
- * g++ -static -O3 -ffast-math -lm -o TMscoreC TMscoreC.cpp
+ * g++ -static -O3 -ffast-math -o TMscoreCmt TMscoreCmt.cpp
+ * g++ -static -O3 -ffast-math -lm -o TMscoreCmt TMscoreCmt.cpp
  ******************************************************************/ 
 
-const char* VERSION = "J20240712";
+const char* VERSION = "V20240712";
 
 typedef enum {
 	PROTEIN, // 0
@@ -67,7 +77,6 @@ typedef struct {
 }INTERFACE_PAIR; 
 
 bool g_lig_match_in_order_or_content = false; // false means with content
-
 double g_interact_dis_cut_pow2 = 64.;
 bool g_fully_cared_ligatom_match = true;
 bool g_use_rtmscore_to_search_best = false; // whether use rtmscore to search best superimpose.
@@ -80,7 +89,7 @@ ALIGN_TYPE g_ali_type = NORMAL;
 bool g_go_detail = false;
 
 double g_user_given_d0 = -1.; 
-double g_user_given_d02 = -1.; 
+double g_user_given_d02 = -1.;
 
 bool g_is_sup_protein = true;
 bool g_is_sup_dna     = true;
@@ -97,10 +106,26 @@ bool g_is_output_in_detail = false;
 
 string g_atomtype_nuc = " C3'";
 string g_atomtype_res = " CA ";
+int g_cpu_num = 10; 
 
 string TOOL_EXE = "TM-score-Complex";
 
 double g_eps = 1e-9;
+
+class CSystem{
+	public:
+		static int get_cpu_count() {
+		#ifdef _WIN32
+		    SYSTEM_INFO sysinfo;
+		    GetSystemInfo(&sysinfo);
+		    return sysinfo.dwNumberOfProcessors;
+		#elif defined(__linux__) || defined(__APPLE__)
+		    return get_nprocs();
+		#else
+		    return -1; // Unsupported system
+		#endif
+		}
+};
 
 class CSort{
 	public:
@@ -378,7 +403,7 @@ class CBaseFunc {
 		static double gdt_ha(const vector<double>& dis2_vec);
 		static double rmsd(const vector<double>& dis2_vec);
 		
-		static int        sum(const vector<int>& vec){
+		static int sum(const vector<int>& vec){
 			int i = 0, n = vec.size();
 			int ans = 0;
 			for (i = 0; i <n; i++){
@@ -399,7 +424,9 @@ class CBaseFunc {
 		static char       nucletideAbbr3WordsTo1(const string& nuc);
 		static string     aminoAcidAbbr1WordTo3(const char& acid);
 		static char       aminoAcidAbbr3WordsTo1(const string& acid);
+		static double*    new1Darr(const int& r);
 		static double**   new2Darr(const int& r, const int& c);
+		static double***  new3Darr(int row, int col, int thd);
 		static void       delete2Darr(double** pMtx, const int& r);
 		static int**      new2DIntArr(const int& row, const int& col);
 		static void       delete2DIntArr(const int& n, int ** Arr);
@@ -408,6 +435,7 @@ class CBaseFunc {
 		static void       delete2DBoolArr(const int& n, bool ** Arr);
 		static int***     new3DIntArr(int row, int col, int thd);
 		static void       delete3DIntArr(int row, int col, int*** Arr);
+		static void       delete3Darr(int row, int col, double*** Arr);
 		static string     charVec2String(const vector<char>& vec);
 		static vector<string> string2stringVec(const string& str);
 		static vector<string> stringSplit(const string& str, const char& spit);
@@ -419,13 +447,83 @@ class CBaseFunc {
 		
 		static double greedySearch(double** scoMtx, const int& rownum, const int& colnum, int* alivec, int* transpose_alivec);
 		static double __2merExchangedSearch(double** scoMtx, const int& rownum, const int& colnum, int* alivec, int* transpose_alivec, const double& prev_score, const int& iter_max);
-		static double __3merExchangedSearch(double** scoMtx, const int& rownum, const int& colnum, int* alivec, int* transpose_alivec, const double& prev_score, const int& iter_max); 
+		static double __3merExchangedSearch(double** scoMtx, const int& rownum, const int& colnum, int* alivec, int* transpose_alivec, const double& prev_score, const int& iter_max);
 		
 		static double cal_rot_tran_from_query_to_templ__(const vector<double*>& query, const vector<double*>& templ, double** out_u, double* out_t, const double& user_d0, const bool& fast);
 		static double cal_rot_tran_from_query_to_templ__II(const vector<double*>& query, const vector<double*>& templ, double** out_u, double* out_t, const double& user_d0, const bool& fast);
 		static double cal_rot_tran_from_query_to_templ__(const vector<double*>& query, const vector<double*>& templ, double** out_u, double* out_t, const double& user_d0, const int* q2t, const bool& fast);
-		static double cal_rot_tran_from_query_to_templ__(const vector<double*>& query, const vector<double*>& templ, const vector<MOLTYPE>& moltypes, double** out_u, double* out_t, const double& user_d0_pro, const double& user_d0_dna,  const double& user_d0_rna, const double& user_d0_lig, const bool& fast);
-		static double cal_rot_tran_from_query_to_templ__II(const vector<double*>& query, const vector<double*>& templ, const vector<MOLTYPE>& moltypes, double** out_u, double* out_t, const double& user_d0_pro, const double& user_d0_dna, const double& user_d0_rna, const double& user_d0_lig, const bool& fast); 
+		static double cal_rot_tran_from_query_to_templ__(const vector<double*>& query, const vector<double*>& templ, const vector<MOLTYPE>& moltypes,  double** out_u, double* out_t, const double& user_d0_pro, const double& user_d0_dna,  const double& user_d0_rna, const double& user_d0_lig, const bool& fast);
+		
+		static void sub_of_cal_rot_tran_from_query_to_templ__1(
+								int nmax,
+								int nseq,
+								double* xa,
+								double* ya,
+								double* za,
+								double* xb,
+								double* yb,
+								double* zb,
+						 		const int* L_ini,
+						 		int sind_init,
+						 		int eind_init, /*inclusive*/
+								int n_ali,
+								int n_it,
+								double* score_max_arr,
+								double*** out_u_arr,
+								double** out_t_arr,
+								double d0_search,
+								double d02,
+								bool fast);
+		
+		static void sub_of_cal_rot_tran_from_query_to_templ__1_II(
+								int nmax,
+								int nseq,
+								double* xa,
+								double* ya,
+								double* za,
+								double* xb,
+								double* yb,
+								double* zb,
+						 		const int* L_ini,
+						 		int sind_init,
+						 		int eind_init, /*inclusive*/
+								int n_ali,
+								int n_it,
+								double* score_max_arr,
+								double*** out_u_arr,
+								double** out_t_arr,
+								double d0_search,
+								double d02,
+								bool fast);
+								
+		static double sub_of_cal_rot_tran_from_query_to_templ__2(
+								int nmax,
+								int nseq,
+								double* xa,
+								double* ya,
+								double* za,
+								double* xb,
+								double* yb,
+								double* zb,
+								MOLTYPE* mt,
+						 		int* L_ini,
+						 		int sind_init,
+						 		int eind_init, /*inclusive*/
+								int n_ali,
+								int n_it,
+								double* score_max_arr,
+								double*** out_u_arr,
+								double** out_t_arr,
+								double d0_search_pro,
+								double d0_search_dna,
+								double d0_search_rna,
+								double d0_search_lig,
+								double d02_pro,
+								double d02_dna,
+								double d02_rna,
+								double d02_lig,
+								bool fast);
+		
 		static void score_fun(double* xt, double* yt, double* zt, double* xb, double* yb, double* zb, const double& d2, int& n_cut, int& n_ali, int* i_ali, const double& d02, const int& nseq, double& score);
 		static void score_fun(double* xt, double* yt, double* zt, double* xb, double* yb, double* zb, MOLTYPE* mt, 
 								const double& d_pro2, const double& d_dna2, const double& d_rna2, const double& d_lig2, 
@@ -448,6 +546,34 @@ class CBaseFunc {
             map<int, double>& chain_index_corr_to_query__d02,
 			const vector<int>& chain_index_corr_to_query,
 			double** out_u, double* out_t, const bool& fast);
+		
+		static void sub_of_cal_rot_tran_from_query_to_templ__for_rTMscore(
+			int nmax,
+			int nseq,
+			double* xa,
+			double* ya,
+			double* za,
+			double* xb,
+			double* yb,
+			double* zb,
+	 		int* L_ini,
+	 		int sind_init,
+	 		int eind_init, /*inclusive*/
+			int n_ali,
+			int n_it,
+			double* score_max_arr,
+			double*** out_u_arr,
+			double** out_t_arr,
+			const int aligned_chain_num, 
+			const int chain_num, 
+			int* __chain_index,
+			map<int, int> chain_index_corr_to_query__aa_num,
+			map<int, MOLTYPE> chain_index_corr_to_query__moltype,
+	        map<int, double> d0_search,
+	        map<int, double> chain_index_corr_to_query__d02,
+			vector<int> chain_index_corr_to_query,
+			bool fast); 
+		
 		static void score_fun_rtmsco(
 			const int& aligned_chain_num,
 			const int& chain_num,
@@ -675,7 +801,7 @@ class CNWalign {
 		int gap_open;
 		int gap_extn;
 		int identity_num;
-		int* identity_ali;  // save the aligned information // index start from 0 // it is normal alignment not identity alignment like US-align's option "-TM-score 7"
+		int* identity_ali;  // save the aligned information // index start from 0
 };
 
 class Molecule {
@@ -876,8 +1002,8 @@ class LigAtomMatcher {
 		const bool match(LigAtomMatcher& other);
 		static double quick_identity_atom_align(Molecule* query, Molecule* templ, double** in_u, double* in_t, int* out_q2t, const double& d02);
 		static double quick_identity_atom_align(Molecule* query, Molecule* templ, int* out_q2t, double** out_u, double* out_t, const double& d02);
-		static double quick_identity_atom_align(LigAtomMatcher& querym, LigAtomMatcher& templm, double** in_u, double* in_t, int* out_q2t, const double& d02);
-		static double quick_identity_atom_align(LigAtomMatcher& querym, LigAtomMatcher& templm, int* out_q2t, double** out_u, double* out_t, const double& d02);
+		static double quick_identity_atom_align(LigAtomMatcher& query, LigAtomMatcher& templ, double** in_u, double* in_t, int* out_q2t, const double& d02);
+		static double quick_identity_atom_align(LigAtomMatcher& query, LigAtomMatcher& templ, int* out_q2t, double** out_u, double* out_t, const double& d02);
 	private:
 		bool is_same_roads(const vector<vector<string>* >& ar, const vector<vector<string>* >& br);
 		vector<vector<string>* >* extract_ith_roads(int** ar, const string* attypes);
@@ -891,14 +1017,12 @@ inline const bool LigAtomMatcher::match(LigAtomMatcher& other){
 	
 	int mx = qatgs.size();
 	int nx = tatgs.size();
-	
 	bool ans = true;
 	if (mx == nx){
 		bool* is_used = CBaseFunc::new1Dbool(nx);
 		for (int i = 0; i < mx; i++){
 			vector<int>& ith = *qatgs[i];
 			int matched_j = -1;
-			
 			for (int j = 0; j < nx; j++){
 				vector<int>& jth = *tatgs[j];
 				if (is_used[j]) continue;
@@ -1364,7 +1488,7 @@ class CTMscoreComplex {
 		int qsize;
 		int tsize;
 		double tmscore;
-		double rtmscore;  // just a whole level, it is not ok for the cases with miss matched native chains 
+		double rtmscore;
 		double use_seconds;
 		double** u;
 		double* t;
@@ -1409,6 +1533,7 @@ class CTMscoreComplex {
 		void save_superposition_ditances(const string& savepath);
 		void save_roted_query(const string& savepath);
 		void save_roted_templ(const string& savepath);
+		void save_sup_pdb_for_web(const string& savepath);
 		virtual ~CTMscoreComplex();
 	private:
 		void align_monomer(const bool& fast);
@@ -1428,8 +1553,7 @@ class CTMscoreComplex {
 		void align_multimer_normal_using_not_nwalign_and_not_greadsearch_with_max_rtmscore(const bool& fast);
 		
 		void align_multimer_normal_using_nwalign_and_greadsearch_fullycared_ligand(const bool& fast);
-		void align_multimer_normal_using_nwalign_and_greadsearch_fullycared_ligand_II(const bool& fast);
-		void align_multimer_normal_using_nwalign_and_greadsearch_fullycared_ligand_III(const bool& fast);
+		void align_multimer_normal_using_nwalign_and_greadsearch_fullycared_ligand_III(const bool& fast); 
 		void align_multimer_normal_using_nwalign_and_greadsearch_with_max_rtmscore_fullycared_ligand(const bool& fast);
 		void align_multimer_normal_using_nwalign_and_greadsearch_with_max_rtmscore_fullycared_ligand_III(const bool& fast);
 		
@@ -1447,7 +1571,8 @@ class CTMscoreComplex {
 		
 		// for interface tm-score
 		double calcluate_itmscore(const double& interact_dis_cut_pow2);
-};
+}; 
+
 
 inline double CTMscoreComplex::calcluate_itmscore(const double& interact_dis_cut_pow2){
 	vector<INTERFACE_PAIR> interface_pair_in_query = query->parse_interface_pair(interact_dis_cut_pow2);
@@ -1578,7 +1703,6 @@ inline double CTMscoreComplex::calcluate_itmscore(const double& interact_dis_cut
 
 int main(int argc, char** args) {
 	TOOL_EXE = args[0];
-	
 	int i, j, pdbFileInd = 0;
 	
 	string query_pdb;
@@ -1587,10 +1711,14 @@ int main(int argc, char** args) {
 	bool isTemplProvide = false;
   	bool isSaveRotTemplInPDB = false;
   	string saveRotTemplInPDBPath;
+  	bool isSaveRotQueryInPDB = false;
+  	string saveRotQueryInPDBPath;
   	bool isSaveUt = false;
 	string saveUtPath;
 	bool isSaveSuperpostion = false;
     string saveSuperpostionPath;
+    bool isSaveWebNeedSuperposition = false;
+	string saveWebNeedSuperpositionPath; 
   	bool is_cif2pdb_func = false;
   	
   	//--------------------------------------------------------------------------//
@@ -1724,6 +1852,22 @@ int main(int argc, char** args) {
 		}else if (0 == strcmp(args[i], "-atom-res") && i < argc-1){
 			g_atomtype_res = args[i+1];
 			i++;
+		}else if (0 == strcmp(args[i], "-ncpu") && i < argc-1){
+			int ncpu = atoi(args[i+1]);
+			int tot_ncpu = CSystem::get_cpu_count();
+			if (ncpu <= 2){
+				if (tot_ncpu >= 2)
+					g_cpu_num = 2;
+				else g_cpu_num = 1;
+			}else {
+				if (-1 != tot_ncpu && ncpu >= tot_ncpu){
+					g_cpu_num = tot_ncpu;
+				}else{
+					g_cpu_num = ncpu;
+				}	
+			}
+			
+			i++;
 		}else if (0 == strcmp(args[i], "-of") && i < argc-1){
 			if (0 == strcmp(args[i+1], "d")){
 				g_is_output_in_detail = true;
@@ -1742,6 +1886,14 @@ int main(int argc, char** args) {
 		}else if (0 == strcmp(args[i], "-o") && i < argc-1){
 			isSaveRotTemplInPDB = true;
       		saveRotTemplInPDBPath = args[i+1];
+      		i++;
+		}else if (0 == strcmp(args[i], "-o1") && i < argc-1){
+			isSaveRotQueryInPDB = true;
+      		saveRotQueryInPDBPath = args[i+1];
+      		i++;
+		}else if (0 == strcmp(args[i], "-oweb") && i < argc-1){
+			isSaveWebNeedSuperposition = true;
+			saveWebNeedSuperpositionPath = args[i+1];
       		i++;
 		}else if (0 == strcmp(args[i], "-sid") && i < argc-1){
 			g_seqid_cutoff = atof(args[i+1]);
@@ -1839,8 +1991,9 @@ int main(int argc, char** args) {
 			 || (g_use_chain_order_or_not && g_ali_type == SLOW)){
 			cout << "WRONG USAGE: Note that, only one of the options of '-ia', '-da y', and '-pts slw' can be applied at the same time." << endl;
 			cout << "But you apply two of options of '-ia', '-da y', and '-pts slw' at least. Please check and re-run it." << endl;
-			exit(1);
+			exit(1); 	
 		}
+		
 		
 		const vector<CHAIN_PAIR>* chain_pair = NULL;
 		if (g_is_inputed_chain_alignment)
@@ -1851,12 +2004,18 @@ int main(int argc, char** args) {
 		
 		if (isSaveRotTemplInPDB)
 			mtm->save_roted_templ(saveRotTemplInPDBPath);
+			
+		if (isSaveRotQueryInPDB)
+			mtm->save_roted_query(saveRotQueryInPDBPath);
 		
 		if (isSaveUt)
 			mtm->save_invUt(saveUtPath);
 			
 		if (isSaveSuperpostion)
 			mtm->save_superposition_ditances(saveSuperpostionPath);
+		
+		if (isSaveWebNeedSuperposition)
+			mtm->save_sup_pdb_for_web(saveWebNeedSuperpositionPath);
 		
 		if (NULL != chain_pair)
 			delete chain_pair;
@@ -1865,18 +2024,6 @@ int main(int argc, char** args) {
 	
 	return 0;
 }
-
-//int main(){
-//	g_is_sup_protein = true;
-//	g_is_sup_dna = false;
-//	g_is_sup_rna = false;
-//	g_is_sup_ligand = false;
-//	
-//	g_use_rtmscore_to_search_best = false;
-//	CTMscoreComplex* mtm = new CTMscoreComplex("D:/install/Apache24/htdocs/codes/cpp/mTMscore/H1114/H1114.pdb", 
-//			"D:/install/Apache24/htdocs/codes/cpp/mTMscore/H1114/H1114TS125_4.pdb", g_ali_type, NULL);
-//	mtm->print_result();
-//} 
 
 inline void CTMscoreComplex::align_multimer_fast_buf_inaccuracy_using_nwalign_and_greadsearch(const bool& fast){
 	int i, j, k, l, m, n, iL;
@@ -2530,48 +2677,6 @@ inline void CTMscoreComplex::align_multimer_normal_using_nwalign_and_greadsearch
 				gs_score = CBaseFunc::__2merExchangedSearch(scomtx, qsize, tsize, ali, transpose_ali, gs_score, qsize);
 				gs_score = CBaseFunc::__3merExchangedSearch(scomtx, qsize, tsize, ali, transpose_ali, gs_score, qsize);
 				
-//				cout << "DEBUG START" << endl;
-//				for (int dei = 0; dei < qsize; dei++){
-//					for (int dej = 0; dej < tsize; dej++){
-//						cout << scomtx[dei][dej] << ' ';
-//					}
-//					cout << endl;
-//				}
-//				
-//				cout << "========================= " << endl;
-//				for (int dei = 0; dei < qsize; dei++)
-//					cout << ali[dei] << ' ';
-//				
-//				cout << endl;
-//				for (int dei = 0; dei < qsize; dei++)
-//					cout << this->query->get_chain(dei) << ' ';
-//				cout << endl;
-//				for (int dei = 0; dei < qsize; dei++)
-//					cout << this->templ->get_chain(ali[dei]) << ' ';
-//				cout << endl;
-//				
-//				cout << "----------------- " << endl;
-//				cout << endl << gs_score << endl;
-//				
-//				
-//				
-//				cout << "====== " << endl;
-//				for (int dei = 0; dei < qsize; dei++)
-//					cout << ali[dei] << ' ';
-//				
-//				cout << endl;
-//				for (int dei = 0; dei < qsize; dei++)
-//					cout << this->query->get_chain(dei) << ' ';
-//				cout << endl;
-//				for (int dei = 0; dei < qsize; dei++)
-//					cout << this->templ->get_chain(ali[dei]) << ' ';
-//				cout << endl;
-//				
-//				cout << "===== " << endl;
-//				cout << endl << gs_score << endl;
-//				
-//				cout << "DEBUG END" << endl;
-				
 				if (gs_score >= corr_gs_score - 0.5){
 					bool is_ok = true;
 					for (k = 0; k < qsize; k++){
@@ -2756,244 +2861,6 @@ inline void CTMscoreComplex::align_multimer_normal_using_nwalign_and_greadsearch
 		else tmscore = CBaseFunc::cal_rot_tran_from_query_to_templ__(aress, bress, mts, u, t, g_user_given_d0, g_user_given_d0, g_user_given_d0, g_user_given_d0, fast);
 		tmscore = tmscore * seqali_res_num / total_res_num;
 		
-//		{
-//			//=============================================
-//			// [start] do chain mapping again
-//			//=============================================
-//			double** scomtx = CBaseFunc::new2Darr(qsize, tsize);
-//		
-//			int*** kl_lig_macther = new int**[qsize];
-//			for (k = 0; k < qsize; k++)
-//				kl_lig_macther[k] = NULL;
-//			
-//			for (k = 0; k < qsize; k++){
-//				Molecule* kmol = (*(this->query))[k];
-//				const MOLTYPE& kmt = kmol->get_moltype();
-//				if (LIGAND == kmt){
-//					kl_lig_macther[k] = new int*[tsize];
-//					for (l = 0; l < tsize; l++)
-//						kl_lig_macther[k][l] = NULL;
-//				}
-//				
-//				const vector<double*> kxyzs = kmol->get_cared_xyz_vec();
-//				vector<double*> roted_kxyzs;
-//				for (l = 0; l < kxyzs.size(); l++)
-//					roted_kxyzs.push_back(CBaseFunc::rotateAndTrans(kxyzs[l], u, t));
-//				
-//				for (l = 0; l < tsize; l++){
-//					Molecule* lmol = (*(this->templ))[l];
-//					const vector<double*> lxyzs = lmol->get_cared_xyz_vec();
-//					
-//					int* k2l = this->get_ij_qt_match_mtx(k, l);
-//					if (NULL == k2l){
-//						scomtx[k][l] = 0.;
-//					}else{
-//						if (kmt == LIGAND){
-//							k2l = new int[kxyzs.size()];
-//							LigAtomMatcher::quick_identity_atom_align(*(q_ligAtomMatch_obj_vec[k]), *(t_ligAtomMatch_obj_vec[l]), u, t, k2l, 4.0);
-//							kl_lig_macther[k][l] = k2l;
-//						}
-//						scomtx[k][l] = CBaseFunc::rough_score(kmt, roted_kxyzs, lxyzs, k2l);
-//					}
-//				}
-//				
-//				for (l = 0; l < roted_kxyzs.size(); l++)
-//					delete[] roted_kxyzs[l];
-//			}
-//			
-//			int* ali = new int[qsize];
-//			int* transpose_ali = new int[tsize];
-//			double gs_score = CBaseFunc::greedySearch(scomtx, qsize, tsize, ali, transpose_ali);
-//			gs_score = CBaseFunc::__2merExchangedSearch(scomtx, qsize, tsize, ali, transpose_ali, gs_score, qsize);
-//			gs_score = CBaseFunc::__3merExchangedSearch(scomtx, qsize, tsize, ali, transpose_ali, gs_score, qsize);
-//			
-//			cout << "DEBUG START" << endl;
-//			for (int dei = 0; dei < qsize; dei++){
-//				for (int dej = 0; dej < tsize; dej++){
-//					cout << scomtx[dei][dej] << ' ';
-//				}
-//				cout << endl;
-//			}
-//			
-//			cout << "========================= " << endl;
-//			for (int dei = 0; dei < qsize; dei++)
-//				cout << ali[dei] << ' ';
-//			
-//			cout << endl;
-//			for (int dei = 0; dei < qsize; dei++)
-//				cout << this->query->get_chain(dei) << ' ';
-//			cout << endl;
-//			for (int dei = 0; dei < qsize; dei++)
-//				cout << this->templ->get_chain(ali[dei]) << ' ';
-//			cout << endl;
-//			
-//			cout << "----------------- " << endl;
-//			cout << endl << gs_score << endl;
-//			cout << "DEBUG END" << endl; 
-//			
-//			bool is_ok = true;
-//			for (k = 0; k < qsize; k++){
-//				if (-1 != ali[k]){
-//					if (NULL == this->get_ij_qt_match_mtx(k, ali[k])){
-//						is_ok = false;
-//						break;
-//					}
-//				}
-//			}
-//			
-//			if (is_ok){
-//				vector<double*> __rotted_aress;
-//				vector<double*> __bress;
-//				vector<MOLTYPE> __mts;
-//				for (k = 0; k < qsize; k++){
-//					if (-1 == ali[k]) continue;
-//					Molecule* amol = (*(this->query))[k];
-//					Molecule* bmol = (*(this->templ))[ali[k]];
-//					
-//					const string& aseq = amol->get_seq_str();
-//					const string& bseq = bmol->get_seq_str();
-//					
-//					const MOLTYPE& amt = amol->get_moltype();
-//					
-//					const vector<double*> axyzs = amol->get_cared_xyz_vec();
-//					const vector<double*> bxyzs = bmol->get_cared_xyz_vec();
-//					
-//					int alen = axyzs.size();
-//					int blen = bxyzs.size();
-//					
-//					int* a2b = this->get_ij_qt_match_mtx(k, ali[k]);
-//					if (LIGAND == amt){
-//						a2b = kl_lig_macther[k][ali[k]];
-//					}
-//					
-//					for (l = 0; l < alen; l++){
-//						if (-1 != a2b[l]){
-//							__rotted_aress.push_back(CBaseFunc::rotateAndTrans(axyzs[l], u, t));
-//							__bress.push_back(bxyzs[a2b[l]]);
-//							__mts.push_back(amt);
-//						}
-//					}
-//				}
-//				
-//				double score = CBaseFunc::score_fun_once(__rotted_aress, __bress, mts, d02_pro, d02_dna, d02_rna, d02_lig, total_res_num); xxx notice g_user_given_d0
-//				cout << "xxx : " <<  score << endl; 
-//				if (score - tmscore > 1e-9){
-//					tmscore = score;
-//					if (NULL != this->obj_level_ali)
-//						delete[] this->obj_level_ali;
-//					this->obj_level_ali = ali;
-//					ali = NULL;
-//					
-//					// reinitial information
-//					aligned_chain_num = 0;
-//					seqali_res_num = 0;
-//					aress.clear();
-//					bress.clear();
-//					chain_index_corr_to_query.clear();
-//					mts.clear();
-//					__a2b__aa__.clear();
-//					aseq_vec.clear();
-//					bseq_vec.clear();
-//					
-//					for (i = 0; i < qsize; i++){
-//						if (-1 == this->obj_level_ali[i]) continue;
-//						
-//						aligned_chain_num++;
-//						
-//						Molecule* amol = (*(this->query))[i];
-//						Molecule* bmol = (*(this->templ))[this->obj_level_ali[i]];
-//						
-//						const string& aseq = amol->get_seq_str();
-//						const string& bseq = bmol->get_seq_str();
-//						
-//						const MOLTYPE& amt = amol->get_moltype();
-//						
-//						const vector<double*> axyzs = amol->get_cared_xyz_vec();
-//						const vector<double*> bxyzs = bmol->get_cared_xyz_vec();
-//						
-//						int alen = axyzs.size();
-//						int blen = bxyzs.size();
-//						
-//						if (DETAIL == g_print_result_type){
-//							achain = this->query->get_chain(i);
-//							bchain = this->templ->get_chain(this->obj_level_ali[i]);
-//							
-//							if (LIGAND == amt){
-//								aseq_vec = CBaseFunc::stringSplit(aseq, ' ');
-//								bseq_vec = CBaseFunc::stringSplit(bseq, ' ');
-//							}
-//						}
-//						
-//						int* a2b = this->get_ij_qt_match_mtx(i, this->obj_level_ali[i]); 
-//						if (LIGAND == amt){
-//							if (NULL != best_kl_lig_macther && NULL != best_kl_lig_macther[i])
-//								a2b = best_kl_lig_macther[i][this->obj_level_ali[i]];
-//						}
-//						for (j = 0; j < alen; j++){
-//							if (-1 != a2b[j]){
-//								aress.push_back(axyzs[j]);
-//								bress.push_back(bxyzs[a2b[j]]);
-//								chain_index_corr_to_query.push_back(i);
-//								mts.push_back(amt);
-//								
-//								if (DETAIL == g_print_result_type){
-//									ALIGN_PAIR ap;
-//									ap.qchain = achain;
-//									ap.tchain = bchain;
-//									ap.qind = j;
-//									ap.tind = a2b[j];
-//									ap.qoind = amol->get_ith_orig_index(j);
-//									ap.toind = bmol->get_ith_orig_index(a2b[j]);
-//									ap.qoindsuf = amol->get_ith_char_following_orig_index_vec(j);
-//									ap.toindsuf = bmol->get_ith_char_following_orig_index_vec(a2b[j]);
-//									
-//									if (LIGAND == amt){
-//										ap.qaa = aseq_vec[j];
-//										ap.taa = bseq_vec[a2b[j]]; 
-//									}else{
-//										ap.qaa = aseq[j];
-//										ap.taa = bseq[a2b[j]]; 	
-//									}
-//									
-//									__a2b__aa__.push_back(ap);
-//								}
-//								
-//								seqali_res_num++;
-//							}
-//						}
-//					}
-//				}
-//				
-//				int nn = __rotted_aress.size();
-//				for (k = 0; k < nn; k++)
-//					delete[] __rotted_aress[k];
-//			}
-//			
-//			if (NULL != ali)
-//				delete[] ali;
-//			delete[] transpose_ali;
-//			
-//			// release kl_lig_macther
-//			if (NULL != kl_lig_macther){
-//				for (k = 0; k < qsize; k++){
-//					if (NULL != kl_lig_macther[k]){
-//						for (l = 0; l < tsize; l++){
-//							if (NULL != kl_lig_macther[k][l])
-//								delete[] kl_lig_macther[k][l];
-//						}
-//						delete[] kl_lig_macther[k];	
-//					}
-//				}
-//				delete[] kl_lig_macther;
-//			}
-//			
-//			CBaseFunc::delete2Darr(scomtx, qsize); 
-//			
-//			//=============================================
-//			// [end] do chain mapping again
-//			//=============================================
-//		}
-		
 		if (DETAIL == g_print_result_type){
 			int n = aress.size();
 			for (i = 0; i < n; i++){
@@ -3029,753 +2896,6 @@ inline void CTMscoreComplex::align_multimer_normal_using_nwalign_and_greadsearch
 	}
 }
 
-
-inline void CTMscoreComplex::align_multimer_normal_using_nwalign_and_greadsearch_fullycared_ligand_II(const bool& fast){
-	int i, i2, j, j2, k, l, m, n, o, p, iL;
-	char buf[2];
-	string key;
-	
-	int*** best_kl_lig_macther = NULL;
-	if (NULL == this->obj_level_ali){
-		double gs_score, best_sco = 0., corr_gs_score = 0.;
-		double** scomtx = CBaseFunc::new2Darr(qsize, tsize);
-		
-		for (i = 0; i < qsize; i++){
-			Molecule* imol1 = (*(this->query))[i];
-			const vector<double*> ixyzs1 = imol1->get_cared_xyz_vec();
-			int ixyzs1_size = ixyzs1.size();
-			for (i2 = i+1; i2 < qsize; i2++){
-				Molecule* imol2 = (*(this->query))[i2];
-				const vector<double*> ixyzs2 = imol2->get_cared_xyz_vec();
-				int ixyzs2_size = ixyzs2.size();
-				
-				for (j = 0; j < tsize; j++){
-					Molecule* jmol1 = (*(this->templ))[j];
-					const vector<double*> jxyzs1 = jmol1->get_cared_xyz_vec();
-					for (j2 = j+1; j2 < tsize; j2++){
-						Molecule* jmol2 = (*(this->templ))[j2];
-						const vector<double*> jxyzs2 = jmol2->get_cared_xyz_vec();
-						
-						cout << "DEBUG " << i << ' ' << i2 << ' ' << j << ' ' << j2 << ' ' << best_sco << endl;
-						{
-							//--------------------------------------
-							// [START] AB:AB
-							//--------------------------------------
-							vector<double*> ixyzs;
-							vector<double*> jxyzs;
-							
-							int* i2j = this->get_ij_qt_match_mtx(i, j);
-							if (NULL != i2j){
-								for (int hi = 0; hi < ixyzs1_size; hi++){
-									if (-1 != i2j[hi]){
-										ixyzs.push_back(ixyzs1[hi]);
-										jxyzs.push_back(jxyzs1[i2j[hi]]);
-									}
-								}
-							}
-							int* i22j2 = this->get_ij_qt_match_mtx(i2, j2);
-							if (NULL != i22j2){
-								for (int hi = 0; hi < ixyzs2_size; hi++){
-									if (-1 != i22j2[hi]){
-										ixyzs.push_back(ixyzs2[hi]);
-										jxyzs.push_back(jxyzs2[i22j2[hi]]);
-									}
-								}
-							}
-							
-							if (ixyzs.size() < 4)
-								continue;
-							
-							// calculate the u and t
-							CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, 8.0, true);
-							
-							int*** kl_lig_macther = new int**[qsize];
-							for (k = 0; k < qsize; k++)
-								kl_lig_macther[k] = NULL;
-							
-							for (k = 0; k < qsize; k++){
-								Molecule* kmol = (*(this->query))[k];
-								const MOLTYPE& kmt = kmol->get_moltype();
-								if (LIGAND == kmt){
-									kl_lig_macther[k] = new int*[tsize];
-									for (l = 0; l < tsize; l++)
-										kl_lig_macther[k][l] = NULL;
-								}
-								
-								const vector<double*> kxyzs = kmol->get_cared_xyz_vec();
-								vector<double*> roted_kxyzs;
-								for (l = 0; l < kxyzs.size(); l++)
-									roted_kxyzs.push_back(CBaseFunc::rotateAndTrans(kxyzs[l], u, t));
-								
-								for (l = 0; l < tsize; l++){
-									Molecule* lmol = (*(this->templ))[l];
-									const vector<double*> lxyzs = lmol->get_cared_xyz_vec();
-									
-									int* k2l = this->get_ij_qt_match_mtx(k, l);
-									if (NULL == k2l){
-										scomtx[k][l] = 0.;
-									}else{
-										if (kmt == LIGAND){
-											k2l = new int[kxyzs.size()];
-											LigAtomMatcher::quick_identity_atom_align(*(q_ligAtomMatch_obj_vec[k]), *(t_ligAtomMatch_obj_vec[l]), u, t, k2l, 4.0);
-											kl_lig_macther[k][l] = k2l;
-										}
-										scomtx[k][l] = CBaseFunc::rough_score(kmt, roted_kxyzs, lxyzs, k2l);
-									}
-								}
-								
-								for (l = 0; l < roted_kxyzs.size(); l++)
-									delete[] roted_kxyzs[l];
-							}
-							
-							int* ali = new int[qsize];
-							int* transpose_ali = new int[tsize];
-							gs_score = CBaseFunc::greedySearch(scomtx, qsize, tsize, ali, transpose_ali);
-							gs_score = CBaseFunc::__2merExchangedSearch(scomtx, qsize, tsize, ali, transpose_ali, gs_score, qsize);
-							gs_score = CBaseFunc::__3merExchangedSearch(scomtx, qsize, tsize, ali, transpose_ali, gs_score, qsize);
-							if (gs_score >= corr_gs_score - 0.5){
-								bool is_ok = true;
-								for (k = 0; k < qsize; k++){
-									if (-1 != ali[k]){
-										if (NULL == this->get_ij_qt_match_mtx(k, ali[k])){
-											is_ok = false;
-											break;
-										}
-									}
-								}
-								
-								if (is_ok){
-									vector<double*> rotted_aress;
-									vector<double*> bress;
-									vector<MOLTYPE> mts;
-									for (k = 0; k < qsize; k++){
-										if (-1 == ali[k]) continue;
-										Molecule* amol = (*(this->query))[k];
-										Molecule* bmol = (*(this->templ))[ali[k]];
-										
-										const string& aseq = amol->get_seq_str();
-										const string& bseq = bmol->get_seq_str();
-										
-										const MOLTYPE& amt = amol->get_moltype();
-										
-										const vector<double*> axyzs = amol->get_cared_xyz_vec();
-										const vector<double*> bxyzs = bmol->get_cared_xyz_vec();
-										
-										int alen = axyzs.size();
-										int blen = bxyzs.size();
-										
-										int* a2b = this->get_ij_qt_match_mtx(k, ali[k]);
-										if (LIGAND == amt){
-											a2b = kl_lig_macther[k][ali[k]];
-										}
-										
-										for (l = 0; l < alen; l++){
-											if (-1 != a2b[l]){
-												rotted_aress.push_back(CBaseFunc::rotateAndTrans(axyzs[l], u, t));
-												bress.push_back(bxyzs[a2b[l]]);
-												mts.push_back(amt);
-											}
-										}
-									}
-									
-									double score1 = CBaseFunc::u3b_func(rotted_aress, bress, mts, d02_pro, d02_dna, d02_rna, d02_lig) / total_res_num;
-									double score2 = CBaseFunc::score_fun_once(rotted_aress, bress, mts, d02_pro, d02_dna, d02_rna, d02_lig, total_res_num);
-									double score = score1>score2 ? score1 : score2;
-									if (score > best_sco){
-										best_sco = score;
-										corr_gs_score = gs_score;
-										if (NULL != this->obj_level_ali)
-											delete[] this->obj_level_ali;
-										this->obj_level_ali = ali;
-										ali = NULL;
-										
-										if (NULL != best_kl_lig_macther){
-											for (k = 0; k < qsize; k++){
-												if (NULL != best_kl_lig_macther[k]){
-													for (l = 0; l < tsize; l++){
-														if (NULL != best_kl_lig_macther[k][l])
-															delete[] best_kl_lig_macther[k][l];
-													}
-													delete[] best_kl_lig_macther[k];
-												}
-											}
-											delete[] best_kl_lig_macther;
-										}
-										best_kl_lig_macther = kl_lig_macther;
-										kl_lig_macther = NULL;
-									}
-									
-									int nn = rotted_aress.size();
-									for (k = 0; k < nn; k++)
-										delete[] rotted_aress[k];
-								}				
-							}
-							
-							if (NULL != ali)
-								delete[] ali;
-							delete[] transpose_ali;
-							
-							// release kl_lig_macther
-							if (NULL != kl_lig_macther){
-								for (k = 0; k < qsize; k++){
-									if (NULL != kl_lig_macther[k]){
-										for (l = 0; l < tsize; l++){
-											if (NULL != kl_lig_macther[k][l])
-												delete[] kl_lig_macther[k][l];
-										}
-										delete[] kl_lig_macther[k];	
-									}
-								}
-								delete[] kl_lig_macther;
-							}
-							
-							//--------------------------------------
-							// [END] AB:AB
-							//--------------------------------------
-						}
-						{
-							//--------------------------------------
-							// [START] AB:BA
-							//--------------------------------------
-							vector<double*> ixyzs;
-							vector<double*> jxyzs;
-							
-							int* i2j2 = this->get_ij_qt_match_mtx(i, j2);
-							if (NULL != i2j2){
-								for (int hi = 0; hi < ixyzs1_size; hi++){
-									if (-1 != i2j2[hi]){
-										ixyzs.push_back(ixyzs1[hi]);
-										jxyzs.push_back(jxyzs2[i2j2[hi]]);
-									}
-								}
-							}
-							int* i22j = this->get_ij_qt_match_mtx(i2, j);
-							if (NULL != i22j){
-								for (int hi = 0; hi < ixyzs2_size; hi++){
-									if (-1 != i22j[hi]){
-										ixyzs.push_back(ixyzs2[hi]);
-										jxyzs.push_back(jxyzs[i22j[hi]]);
-									}
-								}
-							}
-							
-							if (ixyzs.size() < 4)
-								continue;
-							
-							// calculate the u and t
-							CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, 8.0, true);
-							
-							int*** kl_lig_macther = new int**[qsize];
-							for (k = 0; k < qsize; k++)
-								kl_lig_macther[k] = NULL;
-							
-							for (k = 0; k < qsize; k++){
-								Molecule* kmol = (*(this->query))[k];
-								const MOLTYPE& kmt = kmol->get_moltype();
-								if (LIGAND == kmt){
-									kl_lig_macther[k] = new int*[tsize];
-									for (l = 0; l < tsize; l++)
-										kl_lig_macther[k][l] = NULL;
-								}
-								
-								const vector<double*> kxyzs = kmol->get_cared_xyz_vec();
-								vector<double*> roted_kxyzs;
-								for (l = 0; l < kxyzs.size(); l++)
-									roted_kxyzs.push_back(CBaseFunc::rotateAndTrans(kxyzs[l], u, t));
-								
-								for (l = 0; l < tsize; l++){
-									Molecule* lmol = (*(this->templ))[l];
-									const vector<double*> lxyzs = lmol->get_cared_xyz_vec();
-									
-									int* k2l = this->get_ij_qt_match_mtx(k, l);
-									if (NULL == k2l){
-										scomtx[k][l] = 0.;
-									}else{
-										if (kmt == LIGAND){
-											k2l = new int[kxyzs.size()];
-											LigAtomMatcher::quick_identity_atom_align(*(q_ligAtomMatch_obj_vec[k]), *(t_ligAtomMatch_obj_vec[l]), u, t, k2l, 4.0);
-											kl_lig_macther[k][l] = k2l;
-										}
-										scomtx[k][l] = CBaseFunc::rough_score(kmt, roted_kxyzs, lxyzs, k2l);
-									}
-								}
-								
-								for (l = 0; l < roted_kxyzs.size(); l++)
-									delete[] roted_kxyzs[l];
-							}
-							
-							int* ali = new int[qsize];
-							int* transpose_ali = new int[tsize];
-							gs_score = CBaseFunc::greedySearch(scomtx, qsize, tsize, ali, transpose_ali);
-							gs_score = CBaseFunc::__2merExchangedSearch(scomtx, qsize, tsize, ali, transpose_ali, gs_score, qsize);
-							gs_score = CBaseFunc::__3merExchangedSearch(scomtx, qsize, tsize, ali, transpose_ali, gs_score, qsize);
-							if (gs_score >= corr_gs_score - 0.5){
-								bool is_ok = true;
-								for (k = 0; k < qsize; k++){
-									if (-1 != ali[k]){
-										if (NULL == this->get_ij_qt_match_mtx(k, ali[k])){
-											is_ok = false;
-											break;
-										}
-									}
-								}
-								
-								if (is_ok){
-									vector<double*> rotted_aress;
-									vector<double*> bress;
-									vector<MOLTYPE> mts;
-									for (k = 0; k < qsize; k++){
-										if (-1 == ali[k]) continue;
-										Molecule* amol = (*(this->query))[k];
-										Molecule* bmol = (*(this->templ))[ali[k]];
-										
-										const string& aseq = amol->get_seq_str();
-										const string& bseq = bmol->get_seq_str();
-										
-										const MOLTYPE& amt = amol->get_moltype();
-										
-										const vector<double*> axyzs = amol->get_cared_xyz_vec();
-										const vector<double*> bxyzs = bmol->get_cared_xyz_vec();
-										
-										int alen = axyzs.size();
-										int blen = bxyzs.size();
-										
-										int* a2b = this->get_ij_qt_match_mtx(k, ali[k]);
-										if (LIGAND == amt){
-											a2b = kl_lig_macther[k][ali[k]];
-										}
-										
-										for (l = 0; l < alen; l++){
-											if (-1 != a2b[l]){
-												rotted_aress.push_back(CBaseFunc::rotateAndTrans(axyzs[l], u, t));
-												bress.push_back(bxyzs[a2b[l]]);
-												mts.push_back(amt);
-											}
-										}
-									}
-									
-									double score1 = CBaseFunc::u3b_func(rotted_aress, bress, mts, d02_pro, d02_dna, d02_rna, d02_lig) / total_res_num;
-									double score2 = CBaseFunc::score_fun_once(rotted_aress, bress, mts, d02_pro, d02_dna, d02_rna, d02_lig, total_res_num);
-									double score = score1>score2 ? score1 : score2;
-									if (score > best_sco){
-										best_sco = score;
-										corr_gs_score = gs_score;
-										if (NULL != this->obj_level_ali)
-											delete[] this->obj_level_ali;
-										this->obj_level_ali = ali;
-										ali = NULL;
-										
-										if (NULL != best_kl_lig_macther){
-											for (k = 0; k < qsize; k++){
-												if (NULL != best_kl_lig_macther[k]){
-													for (l = 0; l < tsize; l++){
-														if (NULL != best_kl_lig_macther[k][l])
-															delete[] best_kl_lig_macther[k][l];
-													}
-													delete[] best_kl_lig_macther[k];
-												}
-											}
-											delete[] best_kl_lig_macther;
-										}
-										best_kl_lig_macther = kl_lig_macther;
-										kl_lig_macther = NULL;
-									}
-									
-									int nn = rotted_aress.size();
-									for (k = 0; k < nn; k++)
-										delete[] rotted_aress[k];
-								}				
-							}
-							
-							if (NULL != ali)
-								delete[] ali;
-							delete[] transpose_ali;
-							
-							// release kl_lig_macther
-							if (NULL != kl_lig_macther){
-								for (k = 0; k < qsize; k++){
-									if (NULL != kl_lig_macther[k]){
-										for (l = 0; l < tsize; l++){
-											if (NULL != kl_lig_macther[k][l])
-												delete[] kl_lig_macther[k][l];
-										}
-										delete[] kl_lig_macther[k];	
-									}
-								}
-								delete[] kl_lig_macther;
-							}
-							
-							//--------------------------------------
-							// [END] AB:BA
-							//--------------------------------------
-						}
-					}
-				}
-		
-			}
-		}
-		
-		CBaseFunc::delete2Darr(scomtx, qsize); 
-	}
-	
-	vector<double*> aress;
-	vector<double*> bress;
-	vector<int> chain_index_corr_to_query;
-	vector<MOLTYPE> mts;
-	vector<ALIGN_PAIR> __a2b__aa__;
-	string achain, bchain;
-	vector<string> aseq_vec, bseq_vec;
-	if (NULL != this->obj_level_ali){
-		int aligned_chain_num = 0;
-		int seqali_res_num = 0;
-		for (i = 0; i < qsize; i++){
-			if (-1 == this->obj_level_ali[i]) continue;
-			
-			aligned_chain_num++;
-			
-			Molecule* amol = (*(this->query))[i];
-			Molecule* bmol = (*(this->templ))[this->obj_level_ali[i]];
-			
-			const string& aseq = amol->get_seq_str();
-			const string& bseq = bmol->get_seq_str();
-			
-			const MOLTYPE& amt = amol->get_moltype();
-			
-			const vector<double*> axyzs = amol->get_cared_xyz_vec();
-			const vector<double*> bxyzs = bmol->get_cared_xyz_vec();
-			
-			int alen = axyzs.size();
-			int blen = bxyzs.size();
-			
-			if (DETAIL == g_print_result_type){
-				achain = this->query->get_chain(i);
-				bchain = this->templ->get_chain(this->obj_level_ali[i]);
-				
-				if (LIGAND == amt){
-					aseq_vec = CBaseFunc::stringSplit(aseq, ' ');
-					bseq_vec = CBaseFunc::stringSplit(bseq, ' ');
-				}
-			}
-			
-			int* a2b = this->get_ij_qt_match_mtx(i, this->obj_level_ali[i]); 
-			if (LIGAND == amt){
-				if (NULL != best_kl_lig_macther && NULL != best_kl_lig_macther[i])
-					a2b = best_kl_lig_macther[i][this->obj_level_ali[i]];
-			}
-			for (j = 0; j < alen; j++){
-				if (-1 != a2b[j]){
-					aress.push_back(axyzs[j]);
-					bress.push_back(bxyzs[a2b[j]]);
-					chain_index_corr_to_query.push_back(i);
-					mts.push_back(amt);
-					
-					if (DETAIL == g_print_result_type){
-						ALIGN_PAIR ap;
-						ap.qchain = achain;
-						ap.tchain = bchain;
-						ap.qind = j;
-						ap.tind = a2b[j];
-						ap.qoind = amol->get_ith_orig_index(j);
-						ap.toind = bmol->get_ith_orig_index(a2b[j]);
-						ap.qoindsuf = amol->get_ith_char_following_orig_index_vec(j);
-						ap.toindsuf = bmol->get_ith_char_following_orig_index_vec(a2b[j]);
-						
-						if (LIGAND == amt){
-							ap.qaa = aseq_vec[j];
-							ap.taa = bseq_vec[a2b[j]]; 
-						}else{
-							ap.qaa = aseq[j];
-							ap.taa = bseq[a2b[j]]; 	
-						}
-						
-						__a2b__aa__.push_back(ap);
-					}
-					
-					seqali_res_num++;
-				}
-			}
-		}
-		
-		if (g_user_given_d0 <= 0)
-			tmscore = CBaseFunc::cal_rot_tran_from_query_to_templ__(aress, bress, mts, u, t, d0_pro, d0_dna, d0_rna, d0_lig, fast);
-		else tmscore = CBaseFunc::cal_rot_tran_from_query_to_templ__(aress, bress, mts, u, t, g_user_given_d0, g_user_given_d0, g_user_given_d0, g_user_given_d0, fast);
-		tmscore = tmscore * seqali_res_num / total_res_num;
-		
-		{
-			//=============================================
-			// [start] do chain mapping again
-			//=============================================
-			double** scomtx = CBaseFunc::new2Darr(qsize, tsize);
-		
-			int*** kl_lig_macther = new int**[qsize];
-			for (k = 0; k < qsize; k++)
-				kl_lig_macther[k] = NULL;
-			
-			for (k = 0; k < qsize; k++){
-				Molecule* kmol = (*(this->query))[k];
-				const MOLTYPE& kmt = kmol->get_moltype();
-				if (LIGAND == kmt){
-					kl_lig_macther[k] = new int*[tsize];
-					for (l = 0; l < tsize; l++)
-						kl_lig_macther[k][l] = NULL;
-				}
-				
-				const vector<double*> kxyzs = kmol->get_cared_xyz_vec();
-				vector<double*> roted_kxyzs;
-				for (l = 0; l < kxyzs.size(); l++)
-					roted_kxyzs.push_back(CBaseFunc::rotateAndTrans(kxyzs[l], u, t));
-				
-				for (l = 0; l < tsize; l++){
-					Molecule* lmol = (*(this->templ))[l];
-					const vector<double*> lxyzs = lmol->get_cared_xyz_vec();
-					
-					int* k2l = this->get_ij_qt_match_mtx(k, l);
-					if (NULL == k2l){
-						scomtx[k][l] = 0.;
-					}else{
-						if (kmt == LIGAND){
-							k2l = new int[kxyzs.size()];
-							LigAtomMatcher::quick_identity_atom_align(*(q_ligAtomMatch_obj_vec[k]), *(t_ligAtomMatch_obj_vec[l]), u, t, k2l, 4.0);
-							kl_lig_macther[k][l] = k2l;
-						}
-						scomtx[k][l] = CBaseFunc::rough_score(kmt, roted_kxyzs, lxyzs, k2l);
-					}
-				}
-				
-				for (l = 0; l < roted_kxyzs.size(); l++)
-					delete[] roted_kxyzs[l];
-			}
-			
-			int* ali = new int[qsize];
-			int* transpose_ali = new int[tsize];
-			double gs_score = CBaseFunc::greedySearch(scomtx, qsize, tsize, ali, transpose_ali);
-			gs_score = CBaseFunc::__2merExchangedSearch(scomtx, qsize, tsize, ali, transpose_ali, gs_score, qsize);
-			gs_score = CBaseFunc::__3merExchangedSearch(scomtx, qsize, tsize, ali, transpose_ali, gs_score, qsize);
-			
-			cout << "DEBUG START" << endl;
-			for (int dei = 0; dei < qsize; dei++){
-				for (int dej = 0; dej < tsize; dej++){
-					cout << scomtx[dei][dej] << ' ';
-				}
-				cout << endl;
-			}
-			
-			cout << "========================= " << endl;
-			for (int dei = 0; dei < qsize; dei++)
-				cout << ali[dei] << ' ';
-			
-			cout << endl;
-			for (int dei = 0; dei < qsize; dei++)
-				cout << this->query->get_chain(dei) << ' ';
-			cout << endl;
-			for (int dei = 0; dei < qsize; dei++)
-				cout << this->templ->get_chain(ali[dei]) << ' ';
-			cout << endl;
-			
-			cout << "----------------- " << endl;
-			cout << endl << gs_score << endl;
-			cout << "DEBUG END" << endl; 
-			
-			bool is_ok = true;
-			for (k = 0; k < qsize; k++){
-				if (-1 != ali[k]){
-					if (NULL == this->get_ij_qt_match_mtx(k, ali[k])){
-						is_ok = false;
-						break;
-					}
-				}
-			}
-			
-			if (is_ok){
-				vector<double*> __rotted_aress;
-				vector<double*> __bress;
-				vector<MOLTYPE> __mts;
-				for (k = 0; k < qsize; k++){
-					if (-1 == ali[k]) continue;
-					Molecule* amol = (*(this->query))[k];
-					Molecule* bmol = (*(this->templ))[ali[k]];
-					
-					const string& aseq = amol->get_seq_str();
-					const string& bseq = bmol->get_seq_str();
-					
-					const MOLTYPE& amt = amol->get_moltype();
-					
-					const vector<double*> axyzs = amol->get_cared_xyz_vec();
-					const vector<double*> bxyzs = bmol->get_cared_xyz_vec();
-					
-					int alen = axyzs.size();
-					int blen = bxyzs.size();
-					
-					int* a2b = this->get_ij_qt_match_mtx(k, ali[k]);
-					if (LIGAND == amt){
-						a2b = kl_lig_macther[k][ali[k]];
-					}
-					
-					for (l = 0; l < alen; l++){
-						if (-1 != a2b[l]){
-							__rotted_aress.push_back(CBaseFunc::rotateAndTrans(axyzs[l], u, t));
-							__bress.push_back(bxyzs[a2b[l]]);
-							__mts.push_back(amt);
-						}
-					}
-				}
-				
-				double score = 0.; 
-				if (g_user_given_d0 <= 0)
-					score = CBaseFunc::score_fun_once(__rotted_aress, __bress, mts, d02_pro, d02_dna, d02_rna, d02_lig, total_res_num);
-				else score = CBaseFunc::score_fun_once(__rotted_aress, __bress, mts, g_user_given_d02, g_user_given_d02, g_user_given_d02, g_user_given_d02, total_res_num);
-				
-				if (score - tmscore > 1e-9){
-					tmscore = score;
-					if (NULL != this->obj_level_ali)
-						delete[] this->obj_level_ali;
-					this->obj_level_ali = ali;
-					ali = NULL;
-					
-					// reinitial information
-					aligned_chain_num = 0;
-					seqali_res_num = 0;
-					aress.clear();
-					bress.clear();
-					chain_index_corr_to_query.clear();
-					mts.clear();
-					__a2b__aa__.clear();
-					aseq_vec.clear();
-					bseq_vec.clear();
-					
-					for (i = 0; i < qsize; i++){
-						if (-1 == this->obj_level_ali[i]) continue;
-						
-						aligned_chain_num++;
-						
-						Molecule* amol = (*(this->query))[i];
-						Molecule* bmol = (*(this->templ))[this->obj_level_ali[i]];
-						
-						const string& aseq = amol->get_seq_str();
-						const string& bseq = bmol->get_seq_str();
-						
-						const MOLTYPE& amt = amol->get_moltype();
-						
-						const vector<double*> axyzs = amol->get_cared_xyz_vec();
-						const vector<double*> bxyzs = bmol->get_cared_xyz_vec();
-						
-						int alen = axyzs.size();
-						int blen = bxyzs.size();
-						
-						if (DETAIL == g_print_result_type){
-							achain = this->query->get_chain(i);
-							bchain = this->templ->get_chain(this->obj_level_ali[i]);
-							
-							if (LIGAND == amt){
-								aseq_vec = CBaseFunc::stringSplit(aseq, ' ');
-								bseq_vec = CBaseFunc::stringSplit(bseq, ' ');
-							}
-						}
-						
-						int* a2b = this->get_ij_qt_match_mtx(i, this->obj_level_ali[i]); 
-						if (LIGAND == amt){
-							if (NULL != best_kl_lig_macther && NULL != best_kl_lig_macther[i])
-								a2b = best_kl_lig_macther[i][this->obj_level_ali[i]];
-						}
-						for (j = 0; j < alen; j++){
-							if (-1 != a2b[j]){
-								aress.push_back(axyzs[j]);
-								bress.push_back(bxyzs[a2b[j]]);
-								chain_index_corr_to_query.push_back(i);
-								mts.push_back(amt);
-								
-								if (DETAIL == g_print_result_type){
-									ALIGN_PAIR ap;
-									ap.qchain = achain;
-									ap.tchain = bchain;
-									ap.qind = j;
-									ap.tind = a2b[j];
-									ap.qoind = amol->get_ith_orig_index(j);
-									ap.toind = bmol->get_ith_orig_index(a2b[j]);
-									ap.qoindsuf = amol->get_ith_char_following_orig_index_vec(j);
-									ap.toindsuf = bmol->get_ith_char_following_orig_index_vec(a2b[j]);
-									
-									if (LIGAND == amt){
-										ap.qaa = aseq_vec[j];
-										ap.taa = bseq_vec[a2b[j]]; 
-									}else{
-										ap.qaa = aseq[j];
-										ap.taa = bseq[a2b[j]]; 	
-									}
-									
-									__a2b__aa__.push_back(ap);
-								}
-								
-								seqali_res_num++;
-							}
-						}
-					}
-				}
-				
-				int nn = __rotted_aress.size();
-				for (k = 0; k < nn; k++)
-					delete[] __rotted_aress[k];
-			}
-			
-			if (NULL != ali)
-				delete[] ali;
-			delete[] transpose_ali;
-			
-			// release kl_lig_macther
-			if (NULL != kl_lig_macther){
-				for (k = 0; k < qsize; k++){
-					if (NULL != kl_lig_macther[k]){
-						for (l = 0; l < tsize; l++){
-							if (NULL != kl_lig_macther[k][l])
-								delete[] kl_lig_macther[k][l];
-						}
-						delete[] kl_lig_macther[k];	
-					}
-				}
-				delete[] kl_lig_macther;
-			}
-			
-			CBaseFunc::delete2Darr(scomtx, qsize); 
-			
-			//=============================================
-			// [end] do chain mapping again
-			//=============================================
-		}
-		
-		if (DETAIL == g_print_result_type){
-			int n = aress.size();
-			for (i = 0; i < n; i++){
-				__a2b__aa__[i].dis2 = CBaseFunc::distance2(aress[i], bress[i], u, t);
-				this->aa_level_ali.push_back(__a2b__aa__[i]);
-			}
-		}
-		
-		// calculate rTMscore
-		vector<double*> rotted_axyzs;
-		for (l = 0; l < aress.size(); l++)
-			rotted_axyzs.push_back(CBaseFunc::rotateAndTrans(aress[l], u, t));
-		
-		this->rtmscore = CBaseFunc::score_fun_rtmsco_once(aligned_chain_num, this->qsize, rotted_axyzs, bress, chain_index_corr_to_query, chain_index_corr_to_query__aa_num, chain_index_corr_to_query__d02);
-		
-		for (l = 0; l < rotted_axyzs.size(); l++)
-			delete[] rotted_axyzs[l];
-		vector<double*>().swap(rotted_axyzs);
-	}
-	
-	// release best_kl_lig_macther
-	if (NULL != best_kl_lig_macther){
-		for (k = 0; k < qsize; k++){
-			if (NULL != best_kl_lig_macther[k]){
-				for (l = 0; l < tsize; l++){
-					if (NULL != best_kl_lig_macther[k][l])
-						delete[] best_kl_lig_macther[k][l];
-				}
-				delete[] best_kl_lig_macther[k];	
-			}
-		}
-		delete[] best_kl_lig_macther;
-	}
-}
 
 inline void CTMscoreComplex::align_multimer_normal_using_nwalign_and_greadsearch_fullycared_ligand_III(const bool& fast){
 	int i, i2, j, j2, k, l, m, n, o, p, iL;
@@ -3944,6 +3064,7 @@ inline void CTMscoreComplex::align_multimer_normal_using_nwalign_and_greadsearch
 				}
 			}
 		}
+		
 		
 		if (g_go_detail){
 			//=====================================================
@@ -4124,8 +3245,9 @@ inline void CTMscoreComplex::align_multimer_normal_using_nwalign_and_greadsearch
 			//=====================================================
 		}
 		
+		
 		//==========================================
-		// [START] refinement chain mapping
+		// [START] refinement chain mapping 
 		//==========================================
 		if (NULL != this->obj_level_ali) {
 			int i_num_which_ali_two_j_at_least = 0;
@@ -4537,6 +3659,7 @@ inline void CTMscoreComplex::align_multimer_normal_using_nwalign_and_greadsearch
 					}
 				}
 				
+				
 				double score = 0.; 
 				if (g_user_given_d0 <= 0)
 					score = CBaseFunc::score_fun_once(__rotted_aress, __bress, mts, d02_pro, d02_dna, d02_rna, d02_lig, total_res_num);
@@ -4818,8 +3941,7 @@ inline void CTMscoreComplex::generate_residue_alignment_of_each_molecule_pair_re
 					for (jj = 0; jj < bL; jj++){
 						if (is_used[jj]) continue;
 						l = bmol->get_ith_orig_index(jj);
-						c2 = bmol->get_ith_char_following_orig_index_vec(jj); 
-						if (k == l && c1 == c2){
+						if (k == l){
 							iali = jj;
 							identity_num++;
 							break;
@@ -4845,7 +3967,6 @@ inline void CTMscoreComplex::generate_residue_alignment_of_each_molecule_pair_re
 		}
 	}else{ // use_chain_order_or_not == false
 		int i, j, k, l, aL, bL, m, n;
-		char c1, c2;
 		for (i = 0; i < this->qsize; i++){
 			aL = chain_index_corr_to_query__aa_num[i];
 			Molecule* amol = (*(this->query))[i];
@@ -4872,12 +3993,10 @@ inline void CTMscoreComplex::generate_residue_alignment_of_each_molecule_pair_re
 					qt_match_mtx[i][j] = new int[aL];
 					for (m = 0; m < aL; m++){
 						k = amol->get_ith_orig_index(m);
-						c1 = amol->get_ith_char_following_orig_index_vec(m);
 						int iali = -1;
 						for (n = 0; n < bL; n++){
 							l = bmol->get_ith_orig_index(n);
-							c2 = bmol->get_ith_char_following_orig_index_vec(n);
-							if (k == l && c1 == c2){
+							if (k == l){
 								iali = n;
 								break;
 							}
@@ -4990,6 +4109,8 @@ inline void CTMscoreComplex::generate_residue_alignment_of_each_molecule_pair_us
 			else {
 				cout << "ERROR: There is one pair molecule sequence is not homologous at least under the current sequence identity cutoff (" << g_seqid_cutoff << ")." << endl;
 				cout << "|-- You can use the option of \"-sid\" to reset a smaller sequence identity cutoff and re-run " << TOOL_EXE << "." << endl;
+				cout << "|-- Or, if you make sure the residue/nucletide index in two inputs are matched, you could try option of \"-ri y\"" << endl;
+				cout << "|----->"<< TOOL_EXE << " -ri y pdb1.pdb pdb2.pdb" << endl;
 				cout << "|-- Or, if you do not know the chain alignment, you can directly use the defualt parameters, for example:" << endl;
 				cout << "|----->"<< TOOL_EXE << " pdb1.pdb pdb2.pdb" << endl;
 				exit(1);
@@ -5749,7 +4870,7 @@ inline void CTMscoreComplex::align_multimer_normal_using_nwalign_and_greadsearch
 								LigAtomMatcher::quick_identity_atom_align(*(q_ligAtomMatch_obj_vec[k]), *(t_ligAtomMatch_obj_vec[l]), u, t, k2l, 4.0);
 								kl_lig_macther[k][l] = k2l;
 							}
-							scomtx[k][l] = CBaseFunc::rough_score(kmt, roted_kxyzs, lxyzs, k2l);
+							scomtx[k][l] = CBaseFunc::rough_score(kmt, roted_kxyzs, lxyzs, k2l); 
 						}
 					}
 					
@@ -6038,7 +5159,7 @@ inline void CTMscoreComplex::align_multimer_normal_using_nwalign_and_greadsearch
 		}
 		
 		//==========================================
-		// [START] refinement chain mapping
+		// [START] refinement chain mapping 
 		//==========================================
 		if (NULL != this->obj_level_ali) {
 			int i_num_which_ali_two_j_at_least = 0;
@@ -6721,8 +5842,8 @@ inline void CTMscoreComplex::align_multimer_normal_using_not_nwalign_and_not_gre
 	}
 	
 	if (g_user_given_d0 <= 0)
-		tmscore = CBaseFunc::cal_rot_tran_from_query_to_templ__(aress, bress, mts, u, t, d0_pro, d0_dna, d0_rna, d0_lig, fast);
-	else tmscore = CBaseFunc::cal_rot_tran_from_query_to_templ__(aress, bress, mts, u, t, g_user_given_d0, g_user_given_d0, g_user_given_d0, g_user_given_d0, fast);
+			tmscore = CBaseFunc::cal_rot_tran_from_query_to_templ__(aress, bress, mts, u, t, d0_pro, d0_dna, d0_rna, d0_lig, fast);
+		else tmscore = CBaseFunc::cal_rot_tran_from_query_to_templ__(aress, bress, mts, u, t, g_user_given_d0, g_user_given_d0, g_user_given_d0, g_user_given_d0, fast);
 	tmscore = tmscore * seqali_res_num / total_res_num;
 	
 	if (DETAIL == g_print_result_type){
@@ -6744,7 +5865,6 @@ inline void CTMscoreComplex::align_multimer_normal_using_not_nwalign_and_not_gre
 		delete[] rotted_axyzs[l];
 	vector<double*>().swap(rotted_axyzs);
 }
-
 
 inline void CTMscoreComplex::align_multimer_normal_using_not_nwalign_and_not_greadsearch_with_max_rtmscore(const bool& fast){
 	if (this->qsize != this->tsize){
@@ -7587,7 +6707,6 @@ inline void CTMscoreComplex::align_multimer_slow_but_accuracy_using_nwalign_and_
 			gs_score = CBaseFunc::greedySearch(scomtx, qsize, tsize, ali, transpose_ali);
 			gs_score = CBaseFunc::__2merExchangedSearch(scomtx, qsize, tsize, ali, transpose_ali, gs_score, qsize);
 			gs_score = CBaseFunc::__3merExchangedSearch(scomtx, qsize, tsize, ali, transpose_ali, gs_score, qsize);
-			
 			if (gs_score >= corr_gs_score - 0.5){
 				bool is_ok = true;
 				for (k = 0; k < qsize; k++){
@@ -7768,8 +6887,8 @@ inline void CTMscoreComplex::align_multimer_slow_but_accuracy_using_nwalign_and_
 
 
 inline CTMscoreComplex::CTMscoreComplex(const string& qpdb, const string& tpdb, const ALIGN_TYPE& ali_type, const vector<CHAIN_PAIR>* user_chain_pair){
-	clock_t start_t, end_t;
-	start_t = clock();
+	struct timespec start_t, end_t;
+	clock_gettime(CLOCK_REALTIME, &start_t);
 	
 	this->query = new Complex(qpdb);
 	this->templ = new Complex(tpdb);
@@ -7875,8 +6994,8 @@ inline CTMscoreComplex::CTMscoreComplex(const string& qpdb, const string& tpdb, 
 		}
 	}
 	
-	end_t = clock();
-	this->use_seconds = 1.0*(end_t - start_t)/CLOCKS_PER_SEC;
+	clock_gettime(CLOCK_REALTIME, &end_t);
+	this->use_seconds = (end_t.tv_sec - start_t.tv_sec) + (end_t.tv_nsec - start_t.tv_nsec) / 1e9;
 }
 
 inline void CTMscoreComplex::generate_atom_alignment_of_each_ligand_pair_using_index_order(const bool& use_chain_order_or_not){
@@ -7949,6 +7068,7 @@ inline void CTMscoreComplex::generate_atom_alignment_of_each_ligand_pair_using_i
 		}
 	}
 }
+
 
 inline void CTMscoreComplex::generate_atom_alignment_of_each_ligand_pair_using_greedysearch(const bool& use_chain_order_or_not){
 	if (use_chain_order_or_not){
@@ -8056,6 +7176,7 @@ inline void CTMscoreComplex::generate_atom_alignment_of_each_ligand_pair_using_g
 	}
 }
 
+
 inline int* CTMscoreComplex::get_ij_qt_match_mtx(const int& i, const int& j){
 	if (qt_match_mtx[i] == NULL)
 		return NULL;
@@ -8120,7 +7241,7 @@ inline void CTMscoreComplex::align_monomer(const bool& fast){
 				cout << "  Query: " << qseq << endl;
 				cout << "  Templ: " << tseq << endl;
 				exit(1);
-			}
+			} 
 			
 			tmscore = CBaseFunc::cal_rot_tran_from_query_to_templ__(qxyz_vec, txyz_vec, this->u, this->t, d0, fast);
 			rtmscore = tmscore;
@@ -8155,7 +7276,7 @@ inline void CTMscoreComplex::align_monomer(const bool& fast){
 				for (j = 0; j < tmol_len; j++){
 					l = tmol->get_ith_orig_index(j);
 					c2 = tmol->get_ith_char_following_orig_index_vec(j);
-					if (k == l && c1 == c2){
+					if (k == l){
 						iali = j;
 						break;
 					}
@@ -8532,7 +7653,7 @@ inline double CNWalign::nwalign(const vector<char>& aseq, const vector<int>& aoi
 		
 	
 	CNWalign nwobj(CBaseFunc::charVec2String(new_aseq), CBaseFunc::charVec2String(new_bseq), mol_type); 
-	const int* new_ali = nwobj.get_identity_ali();	
+	const int* new_ali = nwobj.get_identity_ali();
 	
 	for (i = 0; i < alen; i++)
 		out_ali[i] = -1;
@@ -8599,6 +7720,7 @@ inline void CNWalign::run_needleman_wunsch(){
 	for (i = 1; i < alen; i++)
 		for (j = 1; j < blen; j++)
 			score[i][j] = imut[seq1[i]][seq2[j]];
+			
 	
 	val[0][0] = 0;
 	val[1][0] = gap_open;
@@ -9330,6 +8452,13 @@ inline CBaseFunc::~CBaseFunc()
 }
 
 
+inline double* CBaseFunc::new1Darr(const int& r){
+	double* ans = new double[r];
+	for (int i = 0; i < r; i++)
+		ans[i] = 0.;
+	return ans;
+}
+
 /*******************************************************
  * @param r : the row number of the 2D matrix
  * @param c : the column number of the 2D matrix
@@ -9801,6 +8930,7 @@ inline double CBaseFunc::__3merExchangedSearch(double** scoMtx, const int& rownu
 	return score;
 }
 
+
 // Please make sure that rownum > colnum, it will save several seconds O(n^3)
 inline double CBaseFunc::greedySearch(double** scoMtx, const int& rownum, const int& colnum, int* alivec, int* transpose_alivec){
 	int i, corrRowInd, corrColInd, colInd, rr, cc;
@@ -9844,103 +8974,47 @@ inline double CBaseFunc::greedySearch(double** scoMtx, const int& rownum, const 
 	return score;
 }
 
-inline double CBaseFunc::cal_rot_tran_from_query_to_templ__(
-	const vector<double*>& query,
-	const vector<double*>& templ,
-	double** out_u,
-	double* out_t,
-	const double& user_d0,
-	const bool& fast)
-{
-	int i, j, k;
-	int nmax, nseq, n_ali;
-	n_ali = nseq = query.size();
-	nmax = nseq + 1;
+inline void CBaseFunc::sub_of_cal_rot_tran_from_query_to_templ__1(
+		int nmax,
+		int nseq,
+		double* xa,
+		double* ya,
+		double* za,
+		double* xb,
+		double* yb,
+		double* zb,
+ 		const int* L_ini,
+ 		int sind_init,
+ 		int eind_init, /*inclusive*/
+		int n_ali,
+		int n_it,
+		double* score_max_arr,
+		double*** out_u_arr,
+		double** out_t_arr,
+		double d0_search,
+		double d02,
+		bool fast){
 	
-	double d, d2, d0, d02;
+	int i, j, k, LL, ka, ka0, n_cut;;
+	double d, score;
 	
-	int n_cut; // ![1,n_ali],align residues for the score
-	double score;
-	double score_max;
-	double d0_search;
-	
-	int* L_ini = new int[nmax];
 	int* i_ali = new int[nmax];
 	double** u = new2Darr(4, 4);
 	double* t = new double[4];
-	double* iq = new double[nmax];
-	double* xa = new double[nmax];
-	double* ya = new double[nmax];
-	double* za = new double[nmax];
 	double* xt = new double[nmax];
 	double* yt = new double[nmax];
 	double* zt = new double[nmax];
-	double* xb = new double[nmax];
-	double* yb = new double[nmax];
-	double* zb = new double[nmax];
 	double** r_1 = new2Darr(4, nmax);
 	double** r_2 = new2Darr(4, nmax);
 	int* k_ali = new int[nmax];
 	int* k_ali0 = new int[nmax];
 	
-//		seq1A = "*" + p1.getSeq();
-	for (int kk = 0; kk < nseq; kk++) {
-		xa[kk+1] = query[kk][0];
-		ya[kk+1] = query[kk][1];
-		za[kk+1] = query[kk][2];
-	}
-	
-//		seq1B = "*" + p2.getSeq();
-	for (int kk = 0; kk < nseq; kk++) {
-		xb[kk+1] = templ[kk][0];
-		yb[kk+1] = templ[kk][1];
-		zb[kk+1] = templ[kk][2];
-	}
-	
-	int ka0 = 0;
-	d0 = user_d0;
-	d02 = d0*d0;
-	
-	// *** d0_search ----->
-	d0_search = d0;
-	if (d0_search > 8)
-		d0_search = 8;
-	if (d0_search < 4.5)
-		d0_search = 4.5;
+	for (int i_init = sind_init; i_init <= eind_init; i_init++) { // 333
+		int L_init = L_ini[i_init];
+		int iL_max = n_ali - L_init + 1;
 		
-	// *** iterative parameters ----->
-	//int n_it = 20; // !maximum number of iterations
-	int n_it = g_maxmum_number_of_iterations;
-	
-	//int n_init_max = 6; // !maximum number of L_init
-	int n_init_max = g_maxmum_number_of_L_init;
-	
-	int n_init = 0;
-	int L_ini_min = 4;
-	if (n_ali < 4)
-		L_ini_min = n_ali;
-	
-	bool flag1 = false;
-	for (i = 1; i <= (n_init_max - 1); i++) {
-		n_init = n_init + 1;
-		L_ini[n_init] = n_ali / (int) pow(2, (n_init - 1));
-		if (L_ini[n_init] <= L_ini_min) {
-			L_ini[n_init] = L_ini_min;
-			flag1 = true;
-			break;
-		}
-	}
-	if (flag1 == false) {
-		n_init = n_init + 1;
-		L_ini[n_init] = L_ini_min;
-	}
-
-	score_max = 0; // !TM-score
-	int LL, ka, i_init, L_init, iL_max, iL;
-	for (i_init = 1; i_init <= n_init; i_init++) { // 333
-		L_init = L_ini[i_init];
-		iL_max = n_ali - L_init + 1;
-		for (iL = 1; iL <= iL_max; fast? iL+=2 : iL++) { // 300 !on aligned residues,
+		double score_max = 0.;
+		for (int iL = 1; iL <= iL_max; fast? iL+=2 : iL++) { // 300 !on aligned residues,
 			LL = 0;
 			ka = 0;
 			for (i = 1; i <= L_init; i++) {
@@ -9962,7 +9036,8 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__(
 				zt[j] = t[3] + u[3][1] * xa[j] + u[3][2] * ya[j] + u[3][3] * za[j];
 			}
 			d = d0_search - 1;
-			score_fun(xt, yt, zt, xb, yb, zb, d*d, n_cut, n_ali, i_ali, d02, nseq, score); 
+			
+			score_fun(xt, yt, zt, xb, yb, zb, d*d, n_cut, n_ali, i_ali, d02, nseq, score);
 			// iteration
 			if (score_max < score) {
 				score_max = score;
@@ -9973,9 +9048,9 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__(
 				
 				for (i = 1; i < 4; i++) {
 					for (j = 1; j < 4; j++) {
-						out_u[i-1][j-1] = u[i][j];
+						out_u_arr[i_init - 1][i-1][j-1] = u[i][j];
 					}
-					out_t[i-1] = t[i];
+					out_t_arr[i_init - 1][i-1] = t[i];
 				}
 			}
 			
@@ -10013,9 +9088,9 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__(
 					
 					for (i = 1; i < 4; i++) {
 						for (j = 1; j < 4; j++) {
-							out_u[i-1][j-1] = u[i][j];
+							out_u_arr[i_init - 1][i-1][j-1] = u[i][j];
 						}
-						out_t[i-1] = t[i];
+						out_t_arr[i_init - 1][i-1] = t[i];
 					}
 				}
 				if (it == n_it) {
@@ -10032,31 +9107,367 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__(
 						break;
 					}
 				}
-			} 
+			}
 		}
+		
+		score_max_arr[i_init - 1] = score_max;
 	}
 	
-	delete[] L_ini;
 	delete[] i_ali;
 	delete2Darr(u, 4);
 	delete[] t;
-	delete[] iq;
-	delete[] xa;
-	delete[] ya;
-	delete[] za;
 	delete[] xt;
 	delete[] yt;
 	delete[] zt;
-	delete[] xb;
-	delete[] yb;
-	delete[] zb;
 	delete2Darr(r_1, 4);
 	delete2Darr(r_2, 4);
 	delete[] k_ali;
 	delete[] k_ali0;
+}
+
+inline void CBaseFunc::sub_of_cal_rot_tran_from_query_to_templ__1_II(
+		int nmax,
+		int nseq,
+		double* xa,
+		double* ya,
+		double* za,
+		double* xb,
+		double* yb,
+		double* zb,
+ 		const int* L_ini,
+ 		int sind_init,
+ 		int eind_init, /*inclusive*/
+		int n_ali,
+		int n_it,
+		double* score_max_arr,
+		double*** out_u_arr,
+		double** out_t_arr,
+		double d0_search,
+		double d02,
+		bool fast){
+	
+	int i, j, k, LL, ka, ka0, n_cut;;
+	double d, score;
+	
+	int* i_ali = new int[nmax];
+	double** u = new2Darr(4, 4);
+	double* t = new double[4];
+	double* xt = new double[nmax];
+	double* yt = new double[nmax];
+	double* zt = new double[nmax];
+	double** r_1 = new2Darr(4, nmax);
+	double** r_2 = new2Darr(4, nmax);
+	int* k_ali = new int[nmax];
+	int* k_ali0 = new int[nmax];
+	
+	for (int i_init = sind_init; i_init <= eind_init; i_init++) { // 333
+		int L_init = L_ini[i_init];
+		int iL_max = n_ali - L_init + 1;
+		
+		double score_max = 0.;
+		for (int iL = 1; iL <= iL_max; fast? iL+=40 : iL++) { // 300 !on aligned residues,
+			LL = 0;
+			ka = 0;
+			for (i = 1; i <= L_init; i++) {
+				k = iL + i - 1; // ![1,n_ali] common
+				r_1[1][i] = xa[k];
+				r_1[2][i] = ya[k];
+				r_1[3][i] = za[k];
+				r_2[1][i] = xb[k];
+				r_2[2][i] = yb[k];
+				r_2[3][i] = zb[k];
+				ka = ka + 1;
+				k_ali[ka] = k;
+				LL = LL + 1;
+			}
+			u3b(r_1, r_2, LL, 1, u, t); // !u rotate r_1 to r_2
+			for (j = 1; j <= nseq; j++) {
+				xt[j] = t[1] + u[1][1] * xa[j] + u[1][2] * ya[j] + u[1][3] * za[j];
+				yt[j] = t[2] + u[2][1] * xa[j] + u[2][2] * ya[j] + u[2][3] * za[j];
+				zt[j] = t[3] + u[3][1] * xa[j] + u[3][2] * ya[j] + u[3][3] * za[j];
+			}
+			d = d0_search - 1;
+			
+			score_fun(xt, yt, zt, xb, yb, zb, d*d, n_cut, n_ali, i_ali, d02, nseq, score);
+			// iteration
+			if (score_max < score) {
+				score_max = score;
+				ka0 = ka;
+				for (i = 1; i <= ka0; i++) {
+					k_ali0[i] = k_ali[i];
+				}
+				
+				for (i = 1; i < 4; i++) {
+					for (j = 1; j < 4; j++) {
+						out_u_arr[i_init - 1][i-1][j-1] = u[i][j];
+					}
+					out_t_arr[i_init - 1][i-1] = t[i];
+				}
+			}
+			
+			// *** iteration for extending
+			// ---------------------------------->
+			d = d0_search + 1;
+			for (int it = 1; it <= n_it; it++) {
+				LL = 0;
+				ka = 0;
+				for (i = 1; i <= n_cut; i++) {
+					int m = i_ali[i]; // ![1,n_ali]
+					r_1[1][i] = xa[m];
+					r_1[2][i] = ya[m];
+					r_1[3][i] = za[m];
+					r_2[1][i] = xb[m];
+					r_2[2][i] = yb[m];
+					r_2[3][i] = zb[m];
+					ka = ka + 1;
+					k_ali[ka] = m;
+					LL = LL + 1;
+				}
+				u3b(r_1, r_2, LL, 1, u, t); // !u rotate r_1 to r_2
+				for (j = 1; j <= nseq; j++) {
+					xt[j] = t[1] + u[1][1] * xa[j] + u[1][2] * ya[j] + u[1][3] * za[j];
+					yt[j] = t[2] + u[2][1] * xa[j] + u[2][2] * ya[j] + u[2][3] * za[j];
+					zt[j] = t[3] + u[3][1] * xa[j] + u[3][2] * ya[j] + u[3][3] * za[j];
+				}
+				score_fun(xt, yt, zt, xb, yb, zb, d*d, n_cut, n_ali, i_ali, d02, nseq, score);
+				if (score_max < score) {
+					score_max = score;
+					ka0 = ka;
+					for (i = 1; i <= ka; i++) {
+						k_ali0[i] = k_ali[i];
+					}
+					
+					for (i = 1; i < 4; i++) {
+						for (j = 1; j < 4; j++) {
+							out_u_arr[i_init - 1][i-1][j-1] = u[i][j];
+						}
+						out_t_arr[i_init - 1][i-1] = t[i];
+					}
+				}
+				if (it == n_it) {
+					break;
+				}
+				if (n_cut == ka) { // then
+					int neq = 0;
+					for (i = 1; i <= n_cut; i++) {
+						if (i_ali[i] == k_ali[i]) {
+							neq = neq + 1;
+						}
+					}
+					if (n_cut == neq) {
+						break;
+					}
+				}
+			}
+		}
+		
+		score_max_arr[i_init - 1] = score_max;
+	}
+	
+	delete[] i_ali;
+	delete2Darr(u, 4);
+	delete[] t;
+	delete[] xt;
+	delete[] yt;
+	delete[] zt;
+	delete2Darr(r_1, 4);
+	delete2Darr(r_2, 4);
+	delete[] k_ali;
+	delete[] k_ali0;
+}
+
+inline double CBaseFunc::cal_rot_tran_from_query_to_templ__(
+	const vector<double*>& query,
+	const vector<double*>& templ,
+	double** out_u,
+	double* out_t,
+	const double& user_d0,
+	const bool& fast)
+{
+	int i, j, k;
+	int nmax, nseq, n_ali;
+	n_ali = nseq = query.size();
+	nmax = nseq + 1;
+	
+	double d, d2, d0, d02;
+	
+	int n_cut; // ![1,n_ali],align residues for the score
+	double d0_search;
+	
+	double* score_max_arr = new1Darr(nmax);
+	int* L_ini = new int[nmax];
+	double*** u_arr = new3Darr(nmax, 3, 3);
+	double** t_arr = new2Darr(nmax, 3);
+	double* xa = new double[nmax];
+	double* ya = new double[nmax];
+	double* za = new double[nmax];
+	double* xb = new double[nmax];
+	double* yb = new double[nmax];
+	double* zb = new double[nmax];
+	
+//		seq1A = "*" + p1.getSeq();
+	for (int kk = 0; kk < nseq; kk++) {
+		xa[kk+1] = query[kk][0];
+		ya[kk+1] = query[kk][1];
+		za[kk+1] = query[kk][2];
+	}
+	
+//		seq1B = "*" + p2.getSeq();
+	for (int kk = 0; kk < nseq; kk++) {
+		xb[kk+1] = templ[kk][0];
+		yb[kk+1] = templ[kk][1];
+		zb[kk+1] = templ[kk][2];
+	}
+	
+	int ka0 = 0;
+	d0 = user_d0;
+	d02 = d0*d0;
+	
+	// *** d0_search ----->
+	d0_search = d0;
+	if (d0_search > 8)
+		d0_search = 8;
+	if (d0_search < 4.5)
+		d0_search = 4.5;
+		
+	// *** iterative parameters ----->
+	//int n_it = 20; // !maximum number of iterations
+	int n_it = g_maxmum_number_of_iterations;
+	
+	//int n_init_max = 6; // !maximum number of L_init
+	int n_init_max = g_maxmum_number_of_L_init>g_cpu_num?g_maxmum_number_of_L_init:g_cpu_num;
+	
+	int n_init = 0;
+	int L_ini_min = 4;
+	if (n_ali < 4)
+		L_ini_min = n_ali;
+	
+	bool flag1 = false;
+	if (n_init_max <= g_cpu_num){
+		if (g_cpu_num >= n_ali){
+			for (i = n_ali-1; i >= L_ini_min; i--) {
+				n_init = n_init + 1;
+				L_ini[n_init] = i;
+				if (L_ini[n_init] <= L_ini_min) {
+					L_ini[n_init] = L_ini_min;
+					flag1 = true;
+					break;
+				}
+			}
+		}else{
+			map<int, char> tags;
+			for (i = 1; i <= (n_init_max - 1); i++) {
+				n_init = n_init + 1;
+				L_ini[n_init] = n_ali / (int) pow(2, (n_init - 1));
+				if (L_ini[n_init] <= L_ini_min) {
+					L_ini[n_init] = L_ini_min;
+					tags[L_ini[n_init]] = 'X';
+					flag1 = true;
+					break;
+				}else{
+					tags[L_ini[n_init]] = 'X';
+				} 
+			}
+			
+			double rootv = pow(n_ali, 1./g_cpu_num);
+			if (rootv > 2.)
+				rootv = 2.;
+			else if (rootv < 1.1)
+				rootv = 1.1;
+			
+			for (i = 1; i <= (n_init_max - 1); i++) {
+				int val = (int) (1. * n_ali / pow(rootv, i-1));
+				val = val > 1 ? val : 1;
+				
+				if (tags.end() == tags.find(val)){
+					tags[val] = 'X';
+					n_init = n_init + 1;
+					L_ini[n_init] = val;
+					if (L_ini[n_init] <= L_ini_min) {
+						L_ini[n_init] = L_ini_min;
+						flag1 = true;
+						break;
+					}
+				}
+			}
+		}
+	}else{
+		for (i = 1; i <= (n_init_max - 1); i++) {
+			n_init = n_init + 1;
+			L_ini[n_init] = n_ali / (int) pow(2, (n_init - 1));
+			if (L_ini[n_init] <= L_ini_min) {
+				L_ini[n_init] = L_ini_min;
+				flag1 = true;
+				break;
+			}
+		}
+	}
+	if (flag1 == false) {
+		n_init = n_init + 1;
+		L_ini[n_init] = L_ini_min;
+	}
+
+	int LL, ka, i_init, L_init, iL_max, iL;
+	
+	int i_init_step = g_cpu_num <= 1 ? n_init : n_init/g_cpu_num;
+	i_init_step = i_init_step <= 0 ? 1 : i_init_step;
+	
+	vector<thread> threads;
+	for (i_init = 1; i_init <= n_init; i_init+=i_init_step) { // 333
+		int sind_init = i_init;
+		int eind_init = i_init+i_init_step-1; // inclusive
+		eind_init = eind_init > n_init ? n_init : eind_init;
+		
+		threads.emplace_back(sub_of_cal_rot_tran_from_query_to_templ__1, 
+											nmax,
+											nseq,
+											xa,
+											ya,
+											za,
+											xb,
+											yb,
+											zb,
+									 		L_ini,
+									 		sind_init,
+									 		eind_init,
+											n_ali,
+											n_it,
+											score_max_arr,
+											u_arr,
+											t_arr,
+											d0_search,
+											d02,
+											fast);
+	}
+	
+	for (auto& thread : threads){
+		if (thread.joinable())
+			thread.join();
+	}
+	
+	int max_index = CSort::find_max_index(n_init, score_max_arr);
+	for (i = 0; i < 3; i++) {
+		for (j = 0; j < 3; j++) {
+			out_u[i][j] = u_arr[max_index][i][j];
+		}
+		out_t[i] = t_arr[max_index][i];
+	}
+	double score_max = score_max_arr[max_index];
+	
+	delete[] score_max_arr;
+	delete[] L_ini;
+	delete3Darr(nmax, 3, u_arr);
+	delete2Darr(t_arr, nmax); 
+	delete[] xa;
+	delete[] ya;
+	delete[] za;
+	delete[] xb;
+	delete[] yb;
+	delete[] zb;
 	
 	return score_max;
 }
+
 
 inline double CBaseFunc::cal_rot_tran_from_query_to_templ__II(
 	const vector<double*>& query,
@@ -10074,28 +9485,18 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__II(
 	double d, d2, d0, d02;
 	
 	int n_cut; // ![1,n_ali],align residues for the score
-	double score;
-	double score_max;
 	double d0_search;
 	
+	double* score_max_arr = new1Darr(nmax);
 	int* L_ini = new int[nmax];
-	int* i_ali = new int[nmax];
-	double** u = new2Darr(4, 4);
-	double* t = new double[4];
-	double* iq = new double[nmax];
+	double*** u_arr = new3Darr(nmax, 3, 3);
+	double** t_arr = new2Darr(nmax, 3);
 	double* xa = new double[nmax];
 	double* ya = new double[nmax];
 	double* za = new double[nmax];
-	double* xt = new double[nmax];
-	double* yt = new double[nmax];
-	double* zt = new double[nmax];
 	double* xb = new double[nmax];
 	double* yb = new double[nmax];
 	double* zb = new double[nmax];
-	double** r_1 = new2Darr(4, nmax);
-	double** r_2 = new2Darr(4, nmax);
-	int* k_ali = new int[nmax];
-	int* k_ali0 = new int[nmax];
 	
 //		seq1A = "*" + p1.getSeq();
 	for (int kk = 0; kk < nseq; kk++) {
@@ -10127,7 +9528,7 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__II(
 	int n_it = g_maxmum_number_of_iterations;
 	
 	//int n_init_max = 6; // !maximum number of L_init
-	int n_init_max = g_maxmum_number_of_L_init;
+	int n_init_max = g_maxmum_number_of_L_init>g_cpu_num?g_maxmum_number_of_L_init:g_cpu_num;
 	
 	int n_init = 0;
 	int L_ini_min = 4;
@@ -10135,13 +9536,63 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__II(
 		L_ini_min = n_ali;
 	
 	bool flag1 = false;
-	for (i = 1; i <= (n_init_max - 1); i++) {
-		n_init = n_init + 1;
-		L_ini[n_init] = n_ali / (int) pow(2, (n_init - 1));
-		if (L_ini[n_init] <= L_ini_min) {
-			L_ini[n_init] = L_ini_min;
-			flag1 = true;
-			break;
+	if (n_init_max <= g_cpu_num){
+		if (g_cpu_num >= n_ali){
+			for (i = n_ali-1; i >= L_ini_min; i--) {
+				n_init = n_init + 1;
+				L_ini[n_init] = i;
+				if (L_ini[n_init] <= L_ini_min) {
+					L_ini[n_init] = L_ini_min;
+					flag1 = true;
+					break;
+				}
+			}
+		}else{
+			map<int, char> tags;
+			for (i = 1; i <= (n_init_max - 1); i++) {
+				n_init = n_init + 1;
+				L_ini[n_init] = n_ali / (int) pow(2, (n_init - 1));
+				if (L_ini[n_init] <= L_ini_min) {
+					L_ini[n_init] = L_ini_min;
+					tags[L_ini[n_init]] = 'X';
+					flag1 = true;
+					break;
+				}else{
+					tags[L_ini[n_init]] = 'X';
+				} 
+			}
+			
+			double rootv = pow(n_ali, 1./g_cpu_num);
+			if (rootv > 2.)
+				rootv = 2.;
+			else if (rootv < 1.1)
+				rootv = 1.1;
+			
+			for (i = 1; i <= (n_init_max - 1); i++) {
+				int val = (int) (1. * n_ali / pow(rootv, i-1));
+				val = val > 1 ? val : 1;
+				
+				if (tags.end() == tags.find(val)){
+					tags[val] = 'X';
+					n_init = n_init + 1;
+					L_ini[n_init] = val;
+					if (L_ini[n_init] <= L_ini_min) {
+						L_ini[n_init] = L_ini_min;
+						flag1 = true;
+						break;
+					}
+				}
+			}
+		}
+	}else{
+		for (i = 1; i <= (n_init_max - 1); i++) {
+			n_init = n_init + 1;
+			L_ini[n_init] = n_ali / (int) pow(2, (n_init - 1));
+			if (L_ini[n_init] <= L_ini_min) {
+				L_ini[n_init] = L_ini_min;
+				flag1 = true;
+				break;
+			}
 		}
 	}
 	if (flag1 == false) {
@@ -10149,12 +9600,117 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__II(
 		L_ini[n_init] = L_ini_min;
 	}
 
-	score_max = 0; // !TM-score
 	int LL, ka, i_init, L_init, iL_max, iL;
-	for (i_init = 1; i_init <= n_init; i_init++) { // 333
-		L_init = L_ini[i_init];
-		iL_max = n_ali - L_init + 1;
-		for (iL = 1; iL <= iL_max; fast? iL+=40 : iL++) { // 300 !on aligned residues,
+	
+	int i_init_step = g_cpu_num <= 1 ? n_init : n_init/g_cpu_num;
+	i_init_step = i_init_step <= 0 ? 1 : i_init_step;
+	
+	vector<thread> threads;
+	for (i_init = 1; i_init <= n_init; i_init+=i_init_step) { // 333
+		int sind_init = i_init;
+		int eind_init = i_init+i_init_step-1; // inclusive
+		eind_init = eind_init > n_init ? n_init : eind_init;
+		
+		threads.emplace_back(sub_of_cal_rot_tran_from_query_to_templ__1_II, 
+											nmax,
+											nseq,
+											xa,
+											ya,
+											za,
+											xb,
+											yb,
+											zb,
+									 		L_ini,
+									 		sind_init,
+									 		eind_init,
+											n_ali,
+											n_it,
+											score_max_arr,
+											u_arr,
+											t_arr,
+											d0_search,
+											d02,
+											fast);
+	}
+	
+	for (auto& thread : threads){
+		if (thread.joinable())
+			thread.join();
+	}
+	
+	int max_index = CSort::find_max_index(n_init, score_max_arr);
+	for (i = 0; i < 3; i++) {
+		for (j = 0; j < 3; j++) {
+			out_u[i][j] = u_arr[max_index][i][j];
+		}
+		out_t[i] = t_arr[max_index][i];
+	}
+	double score_max = score_max_arr[max_index];
+	
+	delete[] score_max_arr;
+	delete[] L_ini;
+	delete3Darr(nmax, 3, u_arr);
+	delete2Darr(t_arr, nmax); 
+	delete[] xa;
+	delete[] ya;
+	delete[] za;
+	delete[] xb;
+	delete[] yb;
+	delete[] zb;
+	
+	return score_max;
+}
+
+inline double CBaseFunc::sub_of_cal_rot_tran_from_query_to_templ__2(
+		int nmax,
+		int nseq,
+		double* xa,
+		double* ya,
+		double* za,
+		double* xb,
+		double* yb,
+		double* zb,
+		MOLTYPE* mt,
+ 		int* L_ini,
+ 		int sind_init,
+ 		int eind_init, /*inclusive*/
+		int n_ali,
+		int n_it,
+		double* score_max_arr,
+		double*** out_u_arr,
+		double** out_t_arr,
+		double d0_search_pro,
+		double d0_search_dna,
+		double d0_search_rna,
+		double d0_search_lig,
+		double d02_pro,
+		double d02_dna,
+		double d02_rna,
+		double d02_lig,
+		bool fast){
+			
+	int i, j, k;
+	double d_pro, d_dna, d_rna, d_lig, score, score_max = 0.;
+	
+	int* i_ali = new int[nmax];
+	double** u = new2Darr(4, 4);
+	double* t = new double[4];
+	double* xt = new double[nmax];
+	double* yt = new double[nmax];
+	double* zt = new double[nmax];
+	double** r_1 = new2Darr(4, nmax);
+	double** r_2 = new2Darr(4, nmax);
+	int* k_ali = new int[nmax];
+	int* k_ali0 = new int[nmax];
+	
+	int LL, ka, ka0, n_cut;
+	
+	for (int i_init = sind_init; i_init <= eind_init; i_init++) { // 333
+		int L_init = L_ini[i_init];
+		int iL_max = n_ali - L_init + 1;
+		
+		double score_max = 0.;
+		for (int iL = 1; iL <= iL_max; fast? iL+=2 : iL++) { // 300 !on aligned residues,
 			LL = 0;
 			ka = 0;
 			for (i = 1; i <= L_init; i++) {
@@ -10175,8 +9731,11 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__II(
 				yt[j] = t[2] + u[2][1] * xa[j] + u[2][2] * ya[j] + u[2][3] * za[j];
 				zt[j] = t[3] + u[3][1] * xa[j] + u[3][2] * ya[j] + u[3][3] * za[j];
 			}
-			d = d0_search - 1;
-			score_fun(xt, yt, zt, xb, yb, zb, d*d, n_cut, n_ali, i_ali, d02, nseq, score); 
+			d_pro = d0_search_pro - 1;
+			d_dna = d0_search_dna - 1;
+			d_rna = d0_search_rna - 1;
+			d_lig = d0_search_lig - 1;
+			score_fun(xt, yt, zt, xb, yb, zb, mt, d_pro*d_pro, d_dna*d_dna, d_rna*d_rna, d_lig*d_lig, n_cut, n_ali, i_ali, d02_pro, d02_dna, d02_rna, d02_lig, nseq, score); 
 			// iteration
 			if (score_max < score) {
 				score_max = score;
@@ -10187,15 +9746,18 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__II(
 				
 				for (i = 1; i < 4; i++) {
 					for (j = 1; j < 4; j++) {
-						out_u[i-1][j-1] = u[i][j];
+						out_u_arr[i_init - 1][i-1][j-1] = u[i][j];
 					}
-					out_t[i-1] = t[i];
+					out_t_arr[i_init - 1][i-1] = t[i];
 				}
 			}
 			
 			// *** iteration for extending
 			// ---------------------------------->
-			d = d0_search + 1;
+			d_pro = d0_search_pro + 1;
+			d_dna = d0_search_dna + 1;
+			d_rna = d0_search_rna + 1;
+			d_lig = d0_search_lig + 1;
 			for (int it = 1; it <= n_it; it++) {
 				LL = 0;
 				ka = 0;
@@ -10217,7 +9779,7 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__II(
 					yt[j] = t[2] + u[2][1] * xa[j] + u[2][2] * ya[j] + u[2][3] * za[j];
 					zt[j] = t[3] + u[3][1] * xa[j] + u[3][2] * ya[j] + u[3][3] * za[j];
 				}
-				score_fun(xt, yt, zt, xb, yb, zb, d*d, n_cut, n_ali, i_ali, d02, nseq, score);
+				score_fun(xt, yt, zt, xb, yb, zb, mt, d_pro*d_pro, d_dna*d_dna, d_rna*d_rna, d_lig*d_lig, n_cut, n_ali, i_ali, d02_pro, d02_dna, d02_rna, d02_lig, nseq, score);
 				if (score_max < score) {
 					score_max = score;
 					ka0 = ka;
@@ -10227,9 +9789,9 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__II(
 					
 					for (i = 1; i < 4; i++) {
 						for (j = 1; j < 4; j++) {
-							out_u[i-1][j-1] = u[i][j];
+							out_u_arr[i_init - 1][i-1][j-1] = u[i][j];
 						}
-						out_t[i-1] = t[i];
+						out_t_arr[i_init - 1][i-1] = t[i];
 					}
 				}
 				if (it == n_it) {
@@ -10248,22 +9810,16 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__II(
 				}
 			} 
 		}
+		
+		score_max_arr[i_init - 1] = score_max;
 	}
 	
-	delete[] L_ini;
 	delete[] i_ali;
 	delete2Darr(u, 4);
 	delete[] t;
-	delete[] iq;
-	delete[] xa;
-	delete[] ya;
-	delete[] za;
 	delete[] xt;
 	delete[] yt;
 	delete[] zt;
-	delete[] xb;
-	delete[] yb;
-	delete[] zb;
 	delete2Darr(r_1, 4);
 	delete2Darr(r_2, 4);
 	delete[] k_ali;
@@ -10285,29 +9841,17 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__(const vector<double*
 	double d_rna, d2_rna, d0_rna, d02_rna, d0_search_rna;
 	double d_lig, d2_lig, d0_lig, d02_lig, d0_search_lig;
 	
-	int n_cut; // ![1,n_ali],align residues for the score
-	double score;
-	double score_max;
-	
-	int* L_ini = new int[nmax];
-	int* i_ali = new int[nmax];
-	double** u = new2Darr(4, 4);
-	double* t = new double[4];
-	double* iq = new double[nmax];
 	MOLTYPE* mt = new MOLTYPE[nmax];
+	double* score_max_arr = new1Darr(nmax);
+	int* L_ini = new int[nmax];
+	double*** u_arr = new3Darr(nmax, 3, 3);
+	double** t_arr = new2Darr(nmax, 3);
 	double* xa = new double[nmax];
 	double* ya = new double[nmax];
 	double* za = new double[nmax];
-	double* xt = new double[nmax];
-	double* yt = new double[nmax];
-	double* zt = new double[nmax];
 	double* xb = new double[nmax];
 	double* yb = new double[nmax];
-	double* zb = new double[nmax];
-	double** r_1 = new2Darr(4, nmax);
-	double** r_2 = new2Darr(4, nmax);
-	int* k_ali = new int[nmax];
-	int* k_ali0 = new int[nmax];
+	double* zb = new double[nmax];	
 	
 //		seq1A = "*" + p1.getSeq();
 	for (int kk = 0; kk < nseq; kk++) {
@@ -10361,7 +9905,7 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__(const vector<double*
 	int n_it = g_maxmum_number_of_iterations;
 	
 	//int n_init_max = 6; // !maximum number of L_init
-	int n_init_max = g_maxmum_number_of_L_init;
+	int n_init_max = g_maxmum_number_of_L_init>g_cpu_num?g_maxmum_number_of_L_init:g_cpu_num;
 	
 	int n_init = 0;
 	int L_ini_min = 4;
@@ -10369,13 +9913,63 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__(const vector<double*
 		L_ini_min = n_ali;
 	
 	bool flag1 = false;
-	for (i = 1; i <= (n_init_max - 1); i++) {
-		n_init = n_init + 1;
-		L_ini[n_init] = n_ali / (int) pow(2, (n_init - 1));
-		if (L_ini[n_init] <= L_ini_min) {
-			L_ini[n_init] = L_ini_min;
-			flag1 = true;
-			break;
+	if (n_init_max <= g_cpu_num){
+		if (g_cpu_num >= n_ali){
+			for (i = n_ali-1; i >= L_ini_min; i--) {
+				n_init = n_init + 1;
+				L_ini[n_init] = i;
+				if (L_ini[n_init] <= L_ini_min) {
+					L_ini[n_init] = L_ini_min;
+					flag1 = true;
+					break;
+				}
+			}
+		}else{
+			map<int, char> tags;
+			for (i = 1; i <= (n_init_max - 1); i++) {
+				n_init = n_init + 1;
+				L_ini[n_init] = n_ali / (int) pow(2, (n_init - 1));
+				if (L_ini[n_init] <= L_ini_min) {
+					L_ini[n_init] = L_ini_min;
+					tags[L_ini[n_init]] = 'X';
+					flag1 = true;
+					break;
+				}else{
+					tags[L_ini[n_init]] = 'X';
+				} 
+			}
+			
+			double rootv = pow(n_ali, 1./g_cpu_num);
+			if (rootv > 2.)
+				rootv = 2.;
+			else if (rootv < 1.1)
+				rootv = 1.1;
+			
+			for (i = 1; i <= (n_init_max - 1); i++) {
+				int val = (int) (1. * n_ali / pow(rootv, i-1));
+				val = val > 1 ? val : 1;
+				
+				if (tags.end() == tags.find(val)){
+					tags[val] = 'X';
+					n_init = n_init + 1;
+					L_ini[n_init] = val;
+					if (L_ini[n_init] <= L_ini_min) {
+						L_ini[n_init] = L_ini_min;
+						flag1 = true;
+						break;
+					}
+				}
+			}
+		}
+	}else{
+		for (i = 1; i <= (n_init_max - 1); i++) {
+			n_init = n_init + 1;
+			L_ini[n_init] = n_ali / (int) pow(2, (n_init - 1));
+			if (L_ini[n_init] <= L_ini_min) {
+				L_ini[n_init] = L_ini_min;
+				flag1 = true;
+				break;
+			}
 		}
 	}
 	if (flag1 == false) {
@@ -10383,500 +9977,122 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__(const vector<double*
 		L_ini[n_init] = L_ini_min;
 	}
 
-	score_max = 0; // !TM-score
-	int LL, ka, i_init, L_init, iL_max, iL;
-	for (i_init = 1; i_init <= n_init; i_init++) { // 333
-		L_init = L_ini[i_init];
-		iL_max = n_ali - L_init + 1;
-		for (iL = 1; iL <= iL_max; fast? iL+=2 : iL++) { // 300 !on aligned residues,
-			LL = 0;
-			ka = 0;
-			for (i = 1; i <= L_init; i++) {
-				k = iL + i - 1; // ![1,n_ali] common
-				r_1[1][i] = xa[k];
-				r_1[2][i] = ya[k];
-				r_1[3][i] = za[k];
-				r_2[1][i] = xb[k];
-				r_2[2][i] = yb[k];
-				r_2[3][i] = zb[k];
-				ka = ka + 1;
-				k_ali[ka] = k;
-				LL = LL + 1;
-			}
-			u3b(r_1, r_2, LL, 1, u, t); // !u rotate r_1 to r_2
-			for (j = 1; j <= nseq; j++) {
-				xt[j] = t[1] + u[1][1] * xa[j] + u[1][2] * ya[j] + u[1][3] * za[j];
-				yt[j] = t[2] + u[2][1] * xa[j] + u[2][2] * ya[j] + u[2][3] * za[j];
-				zt[j] = t[3] + u[3][1] * xa[j] + u[3][2] * ya[j] + u[3][3] * za[j];
-			}
-			d_pro = d0_search_pro - 1;
-			d_dna = d0_search_dna - 1;
-			d_rna = d0_search_rna - 1;
-			d_lig = d0_search_lig - 1;
-			score_fun(xt, yt, zt, xb, yb, zb, mt, d_pro*d_pro, d_dna*d_dna, d_rna*d_rna, d_lig*d_lig, n_cut, n_ali, i_ali, d02_pro, d02_dna, d02_rna, d02_lig, nseq, score); 
-			// iteration
-			if (score_max < score) {
-				score_max = score;
-				ka0 = ka;
-				for (i = 1; i <= ka0; i++) {
-					k_ali0[i] = k_ali[i];
-				}
-				
-				for (i = 1; i < 4; i++) {
-					for (j = 1; j < 4; j++) {
-						out_u[i-1][j-1] = u[i][j];
-					}
-					out_t[i-1] = t[i];
-				}
-			}
-			
-			// *** iteration for extending
-			// ---------------------------------->
-			d_pro = d0_search_pro + 1;
-			d_dna = d0_search_dna + 1;
-			d_rna = d0_search_rna + 1;
-			d_lig = d0_search_lig + 1;
-			for (int it = 1; it <= n_it; it++) {
-				LL = 0;
-				ka = 0;
-				for (i = 1; i <= n_cut; i++) {
-					int m = i_ali[i]; // ![1,n_ali]
-					r_1[1][i] = xa[m];
-					r_1[2][i] = ya[m];
-					r_1[3][i] = za[m];
-					r_2[1][i] = xb[m];
-					r_2[2][i] = yb[m];
-					r_2[3][i] = zb[m];
-					ka = ka + 1;
-					k_ali[ka] = m;
-					LL = LL + 1;
-				}
-				u3b(r_1, r_2, LL, 1, u, t); // !u rotate r_1 to r_2
-				for (j = 1; j <= nseq; j++) {
-					xt[j] = t[1] + u[1][1] * xa[j] + u[1][2] * ya[j] + u[1][3] * za[j];
-					yt[j] = t[2] + u[2][1] * xa[j] + u[2][2] * ya[j] + u[2][3] * za[j];
-					zt[j] = t[3] + u[3][1] * xa[j] + u[3][2] * ya[j] + u[3][3] * za[j];
-				}
-				score_fun(xt, yt, zt, xb, yb, zb, mt, d_pro*d_pro, d_dna*d_dna, d_rna*d_rna, d_lig*d_lig, n_cut, n_ali, i_ali, d02_pro, d02_dna, d02_rna, d02_lig, nseq, score);
-				if (score_max < score) {
-					score_max = score;
-					ka0 = ka;
-					for (i = 1; i <= ka; i++) {
-						k_ali0[i] = k_ali[i];
-					}
-					
-					for (i = 1; i < 4; i++) {
-						for (j = 1; j < 4; j++) {
-							out_u[i-1][j-1] = u[i][j];
-						}
-						out_t[i-1] = t[i];
-					}
-				}
-				if (it == n_it) {
-					break;
-				}
-				if (n_cut == ka) { // then
-					int neq = 0;
-					for (i = 1; i <= n_cut; i++) {
-						if (i_ali[i] == k_ali[i]) {
-							neq = neq + 1;
-						}
-					}
-					if (n_cut == neq) {
-						break;
-					}
-				}
-			} 
-		}
+	int i_init_step = g_cpu_num <= 1 ? n_init : n_init/g_cpu_num;
+	i_init_step = i_init_step <= 0 ? 1 : i_init_step;
+	
+	vector<thread> threads;
+	for (int i_init = 1; i_init <= n_init; i_init+=i_init_step) { // 333
+		int sind_init = i_init;
+		int eind_init = i_init+i_init_step-1; // inclusive
+		eind_init = eind_init > n_init ? n_init : eind_init;
+		
+		threads.emplace_back(sub_of_cal_rot_tran_from_query_to_templ__2,
+											nmax,
+											nseq,
+											xa,
+											ya,
+											za,
+											xb,
+											yb,
+											zb,
+											mt,
+									 		L_ini,
+									 		sind_init,
+											eind_init, 
+											n_ali,
+											n_it,
+											score_max_arr,
+											u_arr,
+											t_arr,
+											d0_search_pro,
+											d0_search_dna,
+											d0_search_rna,
+											d0_search_lig,
+											d02_pro,
+											d02_dna,
+											d02_rna,
+											d02_lig,
+											fast);
 	}
 	
-	delete[] L_ini;
-	delete[] i_ali;
-	delete2Darr(u, 4);
-	delete[] t;
-	delete[] iq;
+	for (auto& thread : threads){
+		if (thread.joinable())
+			thread.join();
+	}
+	
+	int max_index = CSort::find_max_index(n_init, score_max_arr);
+	for (i = 0; i < 3; i++) {
+		for (j = 0; j < 3; j++) {
+			out_u[i][j] = u_arr[max_index][i][j];
+		}
+		out_t[i] = t_arr[max_index][i];
+	}
+	double score_max = score_max_arr[max_index];
+	
 	delete[] mt;
+	delete[] score_max_arr;
+	delete[] L_ini;
+	delete3Darr(nmax, 3, u_arr);
+	delete2Darr(t_arr, nmax); 
 	delete[] xa;
 	delete[] ya;
 	delete[] za;
-	delete[] xt;
-	delete[] yt;
-	delete[] zt;
 	delete[] xb;
 	delete[] yb;
 	delete[] zb;
-	delete2Darr(r_1, 4);
-	delete2Darr(r_2, 4);
-	delete[] k_ali;
-	delete[] k_ali0;
 		
 	return score_max;
 }
 
-
-inline double CBaseFunc::cal_rot_tran_from_query_to_templ__II(const vector<double*>& query, const vector<double*>& templ, const vector<MOLTYPE>& moltypes,
-			 double** out_u, double* out_t, const double& user_d0_pro, const double& user_d0_dna, const double& user_d0_rna, const double& user_d0_lig, const bool& fast){
-	
-	int i, j, k;
-	int nmax, nseq, n_ali;
-	n_ali = nseq = query.size();
-	nmax = nseq + 1;
-	
-	double d_pro, d2_pro, d0_pro, d02_pro, d0_search_pro;
-	double d_dna, d2_dna, d0_dna, d02_dna, d0_search_dna;
-	double d_rna, d2_rna, d0_rna, d02_rna, d0_search_rna;
-	double d_lig, d2_lig, d0_lig, d02_lig, d0_search_lig;
-	
-	int n_cut; // ![1,n_ali],align residues for the score
-	double score;
-	double score_max;
-	
-	int* L_ini = new int[nmax];
-	int* i_ali = new int[nmax];
-	double** u = new2Darr(4, 4);
-	double* t = new double[4];
-	double* iq = new double[nmax];
-	MOLTYPE* mt = new MOLTYPE[nmax];
-	double* xa = new double[nmax];
-	double* ya = new double[nmax];
-	double* za = new double[nmax];
-	double* xt = new double[nmax];
-	double* yt = new double[nmax];
-	double* zt = new double[nmax];
-	double* xb = new double[nmax];
-	double* yb = new double[nmax];
-	double* zb = new double[nmax];
-	double** r_1 = new2Darr(4, nmax);
-	double** r_2 = new2Darr(4, nmax);
-	int* k_ali = new int[nmax];
-	int* k_ali0 = new int[nmax];
-	
-//		seq1A = "*" + p1.getSeq();
-	for (int kk = 0; kk < nseq; kk++) {
-		xa[kk+1] = query[kk][0];
-		ya[kk+1] = query[kk][1];
-		za[kk+1] = query[kk][2];
-		xb[kk+1] = templ[kk][0];
-		yb[kk+1] = templ[kk][1];
-		zb[kk+1] = templ[kk][2];
-		mt[kk+1] = moltypes[kk];
-	}
-	
-	int ka0 = 0;
-	d0_pro = user_d0_pro;
-	d0_dna = user_d0_dna;
-	d0_rna = user_d0_rna;
-	d0_lig = user_d0_lig;
-	
-	d02_pro = d0_pro*d0_pro;
-	d02_dna = d0_dna*d0_dna;
-	d02_rna = d0_rna*d0_rna;
-	d02_lig = d0_lig*d0_lig;
-	
-	// *** d0_search ----->
-	d0_search_pro = d0_pro;
-	if (d0_search_pro > 8)
-		d0_search_pro = 8;
-	if (d0_search_pro < 4.5)
-		d0_search_pro = 4.5;
-	
-	d0_search_dna = d0_dna;
-	if (d0_search_dna > 8)
-		d0_search_dna = 8;
-	if (d0_search_dna < 4.5)
-		d0_search_dna = 4.5;
-	
-	d0_search_rna = d0_rna;
-	if (d0_search_rna > 8)
-		d0_search_rna = 8;
-	if (d0_search_rna < 4.5)
-		d0_search_rna = 4.5;
-		
-	d0_search_lig = d0_lig;
-	if (d0_search_lig > 4)
-		d0_search_lig = 4;
-	if (d0_search_lig < 4.5)
-		d0_search_lig = 4.5;
-		
-	// *** iterative parameters ----->
-	//int n_it = 20; // !maximum number of iterations
-	int n_it = g_maxmum_number_of_iterations;
-	
-	//int n_init_max = 6; // !maximum number of L_init
-	int n_init_max = g_maxmum_number_of_L_init;
-	
-	int n_init = 0;
-	int L_ini_min = 4;
-	if (n_ali < 4)
-		L_ini_min = n_ali;
-	
-	bool flag1 = false;
-	for (i = 1; i <= (n_init_max - 1); i++) {
-		n_init = n_init + 1;
-		L_ini[n_init] = n_ali / (int) pow(2, (n_init - 1));
-		if (L_ini[n_init] <= L_ini_min) {
-			L_ini[n_init] = L_ini_min;
-			flag1 = true;
-			break;
-		}
-	}
-	if (flag1 == false) {
-		n_init = n_init + 1;
-		L_ini[n_init] = L_ini_min;
-	}
-
-	score_max = 0; // !TM-score
-	int LL, ka, i_init, L_init, iL_max, iL;
-	for (i_init = 1; i_init <= n_init; i_init++) { // 333
-		L_init = L_ini[i_init];
-		iL_max = n_ali - L_init + 1;
-		for (iL = 1; iL <= iL_max; fast? iL+=40 : iL++) { // 300 !on aligned residues,
-			LL = 0;
-			ka = 0;
-			for (i = 1; i <= L_init; i++) {
-				k = iL + i - 1; // ![1,n_ali] common
-				r_1[1][i] = xa[k];
-				r_1[2][i] = ya[k];
-				r_1[3][i] = za[k];
-				r_2[1][i] = xb[k];
-				r_2[2][i] = yb[k];
-				r_2[3][i] = zb[k];
-				ka = ka + 1;
-				k_ali[ka] = k;
-				LL = LL + 1;
-			}
-			u3b(r_1, r_2, LL, 1, u, t); // !u rotate r_1 to r_2
-			for (j = 1; j <= nseq; j++) {
-				xt[j] = t[1] + u[1][1] * xa[j] + u[1][2] * ya[j] + u[1][3] * za[j];
-				yt[j] = t[2] + u[2][1] * xa[j] + u[2][2] * ya[j] + u[2][3] * za[j];
-				zt[j] = t[3] + u[3][1] * xa[j] + u[3][2] * ya[j] + u[3][3] * za[j];
-			}
-			d_pro = d0_search_pro - 1;
-			d_dna = d0_search_dna - 1;
-			d_rna = d0_search_rna - 1;
-			d_lig = d0_search_lig - 1;
-			score_fun(xt, yt, zt, xb, yb, zb, mt, d_pro*d_pro, d_dna*d_dna, d_rna*d_rna, d_lig*d_lig, n_cut, n_ali, i_ali, d02_pro, d02_dna, d02_rna, d02_lig, nseq, score); 
-			// iteration
-			if (score_max < score) {
-				score_max = score;
-				ka0 = ka;
-				for (i = 1; i <= ka0; i++) {
-					k_ali0[i] = k_ali[i];
-				}
-				
-				for (i = 1; i < 4; i++) {
-					for (j = 1; j < 4; j++) {
-						out_u[i-1][j-1] = u[i][j];
-					}
-					out_t[i-1] = t[i];
-				}
-			}
-			
-			// *** iteration for extending
-			// ---------------------------------->
-			d_pro = d0_search_pro + 1;
-			d_dna = d0_search_dna + 1;
-			d_rna = d0_search_rna + 1;
-			d_lig = d0_search_lig + 1;
-			for (int it = 1; it <= n_it; it++) {
-				LL = 0;
-				ka = 0;
-				for (i = 1; i <= n_cut; i++) {
-					int m = i_ali[i]; // ![1,n_ali]
-					r_1[1][i] = xa[m];
-					r_1[2][i] = ya[m];
-					r_1[3][i] = za[m];
-					r_2[1][i] = xb[m];
-					r_2[2][i] = yb[m];
-					r_2[3][i] = zb[m];
-					ka = ka + 1;
-					k_ali[ka] = m;
-					LL = LL + 1;
-				}
-				u3b(r_1, r_2, LL, 1, u, t); // !u rotate r_1 to r_2
-				for (j = 1; j <= nseq; j++) {
-					xt[j] = t[1] + u[1][1] * xa[j] + u[1][2] * ya[j] + u[1][3] * za[j];
-					yt[j] = t[2] + u[2][1] * xa[j] + u[2][2] * ya[j] + u[2][3] * za[j];
-					zt[j] = t[3] + u[3][1] * xa[j] + u[3][2] * ya[j] + u[3][3] * za[j];
-				}
-				score_fun(xt, yt, zt, xb, yb, zb, mt, d_pro*d_pro, d_dna*d_dna, d_rna*d_rna, d_lig*d_lig, n_cut, n_ali, i_ali, d02_pro, d02_dna, d02_rna, d02_lig, nseq, score);
-				if (score_max < score) {
-					score_max = score;
-					ka0 = ka;
-					for (i = 1; i <= ka; i++) {
-						k_ali0[i] = k_ali[i];
-					}
-					
-					for (i = 1; i < 4; i++) {
-						for (j = 1; j < 4; j++) {
-							out_u[i-1][j-1] = u[i][j];
-						}
-						out_t[i-1] = t[i];
-					}
-				}
-				if (it == n_it) {
-					break;
-				}
-				if (n_cut == ka) { // then
-					int neq = 0;
-					for (i = 1; i <= n_cut; i++) {
-						if (i_ali[i] == k_ali[i]) {
-							neq = neq + 1;
-						}
-					}
-					if (n_cut == neq) {
-						break;
-					}
-				}
-			} 
-		}
-	}
-	
-	delete[] L_ini;
-	delete[] i_ali;
-	delete2Darr(u, 4);
-	delete[] t;
-	delete[] iq;
-	delete[] mt;
-	delete[] xa;
-	delete[] ya;
-	delete[] za;
-	delete[] xt;
-	delete[] yt;
-	delete[] zt;
-	delete[] xb;
-	delete[] yb;
-	delete[] zb;
-	delete2Darr(r_1, 4);
-	delete2Darr(r_2, 4);
-	delete[] k_ali;
-	delete[] k_ali0;
-		
-	return score_max;
-}
-
-
-inline double CBaseFunc::cal_rot_tran_from_query_to_templ__for_rTMscore(
-			const int& aligned_chain_num, 
-			const int& chain_num, 
-            const vector<double*>& query, const vector<double*>& templ, 
-			map<int, int>& chain_index_corr_to_query__aa_num,
-			map<int, MOLTYPE>& chain_index_corr_to_query__moltype,
-            map<int, double>& chain_index_corr_to_query__d0,
-            map<int, double>& chain_index_corr_to_query__d02,
-			const vector<int>& chain_index_corr_to_query, 
-			double** out_u, double* out_t, const bool& fast){
-	
-	int i, j, k;
-	int nmax, nseq, n_ali;
-	n_ali = nseq = query.size();
-	nmax = nseq + 1;
+inline void CBaseFunc::sub_of_cal_rot_tran_from_query_to_templ__for_rTMscore(
+		int nmax,
+		int nseq,
+		double* xa,
+		double* ya,
+		double* za,
+		double* xb,
+		double* yb,
+		double* zb,
+ 		int* L_ini,
+ 		int sind_init,
+ 		int eind_init, /*inclusive*/
+		int n_ali,
+		int n_it,
+		double* score_max_arr,
+		double*** out_u_arr,
+		double** out_t_arr,
+		const int aligned_chain_num, 
+		const int chain_num, 
+		int* __chain_index,
+		map<int, int> chain_index_corr_to_query__aa_num,
+		map<int, MOLTYPE> chain_index_corr_to_query__moltype,
+        map<int, double> d0_search,
+        map<int, double> chain_index_corr_to_query__d02,
+		vector<int> chain_index_corr_to_query,
+		bool fast){
+	int i, j, k, LL, ka, ka0, n_cut;;
+	double d, score;
 	
 	map<int, double>::iterator it;
 	map<int, double> chain_index_corr_to_query__d2;
 	
-	int n_cut; // ![1,n_ali],align residues for the score
-	double score;
-	double score_max;
-	
-	int* L_ini = new int[nmax];
 	int* i_ali = new int[nmax];
 	double** u = new2Darr(4, 4);
 	double* t = new double[4];
-	double* iq = new double[nmax];
-	double* xa = new double[nmax];
-	double* ya = new double[nmax];
-	double* za = new double[nmax];
-	int* __chain_index = new int[nmax];
 	double* xt = new double[nmax];
 	double* yt = new double[nmax];
 	double* zt = new double[nmax];
-	double* xb = new double[nmax];
-	double* yb = new double[nmax];
-	double* zb = new double[nmax];
 	double** r_1 = new2Darr(4, nmax);
 	double** r_2 = new2Darr(4, nmax);
 	int* k_ali = new int[nmax];
 	int* k_ali0 = new int[nmax];
 	
-//		seq1A = "*" + p1.getSeq();
-	for (int kk = 0; kk < nseq; kk++) {
-		xa[kk+1] = query[kk][0];
-		ya[kk+1] = query[kk][1];
-		za[kk+1] = query[kk][2];
-		xb[kk+1] = templ[kk][0];
-		yb[kk+1] = templ[kk][1];
-		zb[kk+1] = templ[kk][2];
-		__chain_index[kk+1] = chain_index_corr_to_query[kk];
-	}
-	
-	int ka0 = 0;
-	
-	// *** d0_search ----->
-	map<int, double> d0_search;
-	for (it = chain_index_corr_to_query__d0.begin(); it != chain_index_corr_to_query__d0.end(); it++){
-		int cind = it->first;
-		MOLTYPE& mt = chain_index_corr_to_query__moltype[it->first];
-		switch (mt){
-			case PROTEIN:
-				d0_search[cind] = chain_index_corr_to_query__d0[cind];
-				if (d0_search[cind] > 8)
-					d0_search[cind] = 8;
-				if (d0_search[cind] < 4.5)
-					d0_search[cind] = 4.5;
-				break;
-			case DNA:
-			case RNA:
-				d0_search[cind] = chain_index_corr_to_query__d0[cind];
-				if (d0_search[cind] > 8)
-					d0_search[cind] = 8;
-				if (d0_search[cind] < 4.5)
-					d0_search[cind] = 4.5;
-				break;
-			case LIGAND:
-				d0_search[cind] = chain_index_corr_to_query__d0[cind];
-				if (d0_search[cind] > 8)
-					d0_search[cind] = 8;
-				if (d0_search[cind] < 4.5)
-					d0_search[cind] = 4.5;
-				break;
-					
-		}
-	}
+	for (int i_init = sind_init; i_init <= eind_init; i_init++) { // 333
+		int L_init = L_ini[i_init];
+		int iL_max = n_ali - L_init + 1;
 		
-	// *** iterative parameters ----->
-	//int n_it = 20; // !maximum number of iterations
-	int n_it = g_maxmum_number_of_iterations;
-	
-	//int n_init_max = 6; // !maximum number of L_init
-	int n_init_max = g_maxmum_number_of_L_init;
-	
-	int n_init = 0;
-	int L_ini_min = 4;
-	if (n_ali < 4)
-		L_ini_min = n_ali;
-	
-	bool flag1 = false;
-	for (i = 1; i <= (n_init_max - 1); i++) {
-		n_init = n_init + 1;
-		L_ini[n_init] = n_ali / (int) pow(2, (n_init - 1));
-		if (L_ini[n_init] <= L_ini_min) {
-			L_ini[n_init] = L_ini_min;
-			flag1 = true;
-			break;
-		}
-	}
-	if (flag1 == false) {
-		n_init = n_init + 1;
-		L_ini[n_init] = L_ini_min;
-	}
-
-	score_max = 0; // !TM-score
-	int LL, ka, i_init, L_init, iL_max, iL;
-	for (i_init = 1; i_init <= n_init; i_init++) { // 333
-		L_init = L_ini[i_init];
-		iL_max = n_ali - L_init + 1;
-		for (iL = 1; iL <= iL_max; fast ? iL+=2 : iL++) { // 300 !on aligned residues,
+		double score_max = 0.;
+		for (int iL = 1; iL <= iL_max; fast ? iL+=2 : iL++) { // 300 !on aligned residues,
 			LL = 0;
 			ka = 0;
 			for (i = 1; i <= L_init; i++) {
@@ -10928,9 +10144,9 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__for_rTMscore(
 				
 				for (i = 1; i < 4; i++) {
 					for (j = 1; j < 4; j++) {
-						out_u[i-1][j-1] = u[i][j];
+						out_u_arr[i_init - 1][i-1][j-1] = u[i][j];
 					}
-					out_t[i-1] = t[i];
+					out_t_arr[i_init - 1][i-1] = t[i];
 				}
 			}
 			
@@ -10986,9 +10202,9 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__for_rTMscore(
 					
 					for (i = 1; i < 4; i++) {
 						for (j = 1; j < 4; j++) {
-							out_u[i-1][j-1] = u[i][j];
+							out_u_arr[i_init - 1][i-1][j-1] = u[i][j];
 						}
-						out_t[i-1] = t[i];
+						out_t_arr[i_init - 1][i-1] = t[i];
 					}
 				}
 				if (it == n_it) {
@@ -11005,29 +10221,236 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__for_rTMscore(
 						break;
 					}
 				}
-			} 
+			}
 		}
+		
+		score_max_arr[i_init - 1] = score_max;
 	}
 	
-	delete[] L_ini;
 	delete[] i_ali;
 	delete2Darr(u, 4);
 	delete[] t;
-	delete[] iq;
-	delete[] xa;
-	delete[] ya;
-	delete[] za;
-	delete[] __chain_index;
 	delete[] xt;
 	delete[] yt;
 	delete[] zt;
-	delete[] xb;
-	delete[] yb;
-	delete[] zb;
 	delete2Darr(r_1, 4);
 	delete2Darr(r_2, 4);
 	delete[] k_ali;
 	delete[] k_ali0;
+}
+
+inline double CBaseFunc::cal_rot_tran_from_query_to_templ__for_rTMscore(
+			const int& aligned_chain_num, 
+			const int& chain_num, 
+            const vector<double*>& query, const vector<double*>& templ, 
+			map<int, int>& chain_index_corr_to_query__aa_num,
+			map<int, MOLTYPE>& chain_index_corr_to_query__moltype,
+            map<int, double>& chain_index_corr_to_query__d0,
+            map<int, double>& chain_index_corr_to_query__d02,
+			const vector<int>& chain_index_corr_to_query, 
+			double** out_u, double* out_t, const bool& fast){
+	
+	int i, j, k;
+	int nmax, nseq, n_ali;
+	n_ali = nseq = query.size();
+	nmax = nseq + 1;
+	
+	map<int, double>::iterator it;
+	
+	double* score_max_arr = new1Darr(nmax);
+	double*** u_arr = new3Darr(nmax, 3, 3);
+	double** t_arr = new2Darr(nmax, 3);	
+	int* L_ini = new int[nmax];
+	double* xa = new double[nmax];
+	double* ya = new double[nmax];
+	double* za = new double[nmax];
+	int* __chain_index = new int[nmax];
+	double* xb = new double[nmax];
+	double* yb = new double[nmax];
+	double* zb = new double[nmax];
+	
+//		seq1A = "*" + p1.getSeq();
+	for (int kk = 0; kk < nseq; kk++) {
+		xa[kk+1] = query[kk][0];
+		ya[kk+1] = query[kk][1];
+		za[kk+1] = query[kk][2];
+		xb[kk+1] = templ[kk][0];
+		yb[kk+1] = templ[kk][1];
+		zb[kk+1] = templ[kk][2];
+		__chain_index[kk+1] = chain_index_corr_to_query[kk];
+	}
+	
+	// *** d0_search ----->
+	map<int, double> d0_search;
+	for (it = chain_index_corr_to_query__d0.begin(); it != chain_index_corr_to_query__d0.end(); it++){
+		int cind = it->first;
+		MOLTYPE& mt = chain_index_corr_to_query__moltype[it->first];
+		switch (mt){
+			case PROTEIN:
+				d0_search[cind] = chain_index_corr_to_query__d0[cind];
+				if (d0_search[cind] > 8)
+					d0_search[cind] = 8;
+				if (d0_search[cind] < 4.5)
+					d0_search[cind] = 4.5;
+				break;
+			case DNA:
+			case RNA:
+				d0_search[cind] = chain_index_corr_to_query__d0[cind];
+				if (d0_search[cind] > 8)
+					d0_search[cind] = 8;
+				if (d0_search[cind] < 4.5)
+					d0_search[cind] = 4.5;
+				break;
+			case LIGAND:
+				d0_search[cind] = chain_index_corr_to_query__d0[cind];
+				if (d0_search[cind] > 8)
+					d0_search[cind] = 8;
+				if (d0_search[cind] < 4.5)
+					d0_search[cind] = 4.5;
+				break;
+					
+		}
+	}
+		
+	// *** iterative parameters ----->
+	//int n_it = 20; // !maximum number of iterations
+	int n_it = g_maxmum_number_of_iterations;
+	
+	//int n_init_max = 6; // !maximum number of L_init
+	int n_init_max = g_maxmum_number_of_L_init>g_cpu_num?g_maxmum_number_of_L_init:g_cpu_num;
+	
+	int n_init = 0;
+	int L_ini_min = 4;
+	if (n_ali < 4)
+		L_ini_min = n_ali;
+	
+	bool flag1 = false;
+	if (n_init_max <= g_cpu_num){
+		if (g_cpu_num >= n_ali){
+			for (i = n_ali-1; i >= L_ini_min; i--) {
+				n_init = n_init + 1;
+				L_ini[n_init] = i;
+				if (L_ini[n_init] <= L_ini_min) {
+					L_ini[n_init] = L_ini_min;
+					flag1 = true;
+					break;
+				}
+			}
+		}else{
+			map<int, char> tags;
+			for (i = 1; i <= (n_init_max - 1); i++) {
+				n_init = n_init + 1;
+				L_ini[n_init] = n_ali / (int) pow(2, (n_init - 1));
+				if (L_ini[n_init] <= L_ini_min) {
+					L_ini[n_init] = L_ini_min;
+					tags[L_ini[n_init]] = 'X';
+					flag1 = true;
+					break;
+				}else{
+					tags[L_ini[n_init]] = 'X';
+				} 
+			}
+			
+			double rootv = pow(n_ali, 1./g_cpu_num);
+			if (rootv > 2.)
+				rootv = 2.;
+			else if (rootv < 1.1)
+				rootv = 1.1;
+			
+			for (i = 1; i <= (n_init_max - 1); i++) {
+				int val = (int) (1. * n_ali / pow(rootv, i-1));
+				val = val > 1 ? val : 1;
+				
+				if (tags.end() == tags.find(val)){
+					tags[val] = 'X';
+					n_init = n_init + 1;
+					L_ini[n_init] = val;
+					if (L_ini[n_init] <= L_ini_min) {
+						L_ini[n_init] = L_ini_min;
+						flag1 = true;
+						break;
+					}
+				}
+			}
+		}
+	}else{
+		for (i = 1; i <= (n_init_max - 1); i++) {
+			n_init = n_init + 1;
+			L_ini[n_init] = n_ali / (int) pow(2, (n_init - 1));
+			if (L_ini[n_init] <= L_ini_min) {
+				L_ini[n_init] = L_ini_min;
+				flag1 = true;
+				break;
+			}
+		}
+	}
+	if (flag1 == false) {
+		n_init = n_init + 1;
+		L_ini[n_init] = L_ini_min;
+	}
+
+	int i_init_step = g_cpu_num <= 1 ? n_init : n_init/g_cpu_num;
+	i_init_step = i_init_step <= 0 ? 1 : i_init_step;
+	
+	vector<thread> threads;
+	for (int i_init = 1; i_init <= n_init; i_init+=i_init_step) { // 333
+		int sind_init = i_init;
+		int eind_init = i_init+i_init_step-1; // inclusive
+		eind_init = eind_init > n_init ? n_init : eind_init;	
+	
+		threads.emplace_back(sub_of_cal_rot_tran_from_query_to_templ__for_rTMscore,
+									nmax,
+									nseq,
+									xa,
+									ya,
+									za,
+									xb,
+									yb,
+									zb,
+							 		L_ini,
+							 		sind_init,
+							 		eind_init, /*inclusive*/
+									n_ali,
+									n_it,
+									score_max_arr,
+									u_arr,
+									t_arr,
+									aligned_chain_num, 
+									chain_num, 
+									__chain_index,
+									chain_index_corr_to_query__aa_num,
+									chain_index_corr_to_query__moltype,
+							        d0_search,
+							        chain_index_corr_to_query__d02,
+									chain_index_corr_to_query,
+									fast);
+	}
+	
+	for (auto& thread : threads){
+		if (thread.joinable())
+			thread.join();
+	}
+	
+	int max_index = CSort::find_max_index(n_init, score_max_arr);
+	for (i = 0; i < 3; i++) {
+		for (j = 0; j < 3; j++) {
+			out_u[i][j] = u_arr[max_index][i][j];
+		}
+		out_t[i] = t_arr[max_index][i];
+	}
+	double score_max = score_max_arr[max_index];
+	
+	delete[] score_max_arr;
+	delete3Darr(nmax, 3, u_arr);
+	delete2Darr(t_arr, nmax);	
+	delete[] L_ini;
+	delete[] xa;
+	delete[] ya;
+	delete[] za;
+	delete[] __chain_index;
+	delete[] xb;
+	delete[] yb;
+	delete[] zb;
 		
 	return score_max;
 }
@@ -12320,7 +11743,7 @@ inline double CBaseFunc::u3b_func(const vector<double*>& query, const vector<dou
 			u33[i-1][j-1] = u[i][j];
 		}
 		t3[i-1] = t[i];
-	} 
+	}
 	
 	double tmscore = 0.;
 	for (int i = 0; i < n; i++) {
@@ -12413,8 +11836,8 @@ inline bool CBaseFunc::inverse33Mtx(double** A, double** invA){
 	}
 	norm /= 3.0;
 
-	invA[0][0] /= norm; invA[0][1] /= norm; invA[0][2] /= norm; 
-	invA[1][0] /= norm; invA[1][1] /= norm; invA[1][2] /= norm; 
+	invA[0][0] /= norm; invA[0][1] /= norm; invA[0][2] /= norm;
+	invA[1][0] /= norm; invA[1][1] /= norm; invA[1][2] /= norm;
 	invA[2][0] /= norm; invA[2][1] /= norm; invA[2][2] /= norm;
 
 	return true;
@@ -12871,7 +12294,6 @@ inline void CTMscoreComplex::print_result(){
 }
 
 
-
 inline vector<string> CTMscoreComplex::formatRotMtx(){
 	vector<string> ans;
 	
@@ -12905,13 +12327,6 @@ inline vector<string> CTMscoreComplex::formatInvRotMtx(){
 		sprintf(buf, "%d%18.10f %15.10f %15.10f %15.10f", k, inv_t[k], inv_u[k][0], inv_u[k][1], inv_u[k][2]);
 		ans.push_back(string(buf));
 	}
-	ans.push_back(string("\nCode for rotating complex structure in 2nd input from (x,y,z) to (X,Y,Z):"));
-	ans.push_back(string("for(k=0; k<L; k++)"));
-	ans.push_back(string("{"));
-	ans.push_back(string("   X[k] = t[0] + u[0][0]*x[k] + u[0][1]*y[k] + u[0][2]*z[k]"));
-	ans.push_back(string("   Y[k] = t[1] + u[1][0]*x[k] + u[1][1]*y[k] + u[1][2]*z[k]"));
-	ans.push_back(string("   Z[k] = t[2] + u[2][0]*x[k] + u[2][1]*y[k] + u[2][2]*z[k]"));
-	ans.push_back(string("}"));
 
 	return ans;
 }
@@ -12931,6 +12346,43 @@ inline void CTMscoreComplex::invUt(){
 inline void CTMscoreComplex::save_roted_templ(const string& savepath){
 	invUt();
 	templ->save(savepath, inv_u, inv_t);
+}
+
+inline void CTMscoreComplex::save_sup_pdb_for_web(const string& savepath){
+	int i, n;
+	
+	vector<string> q  = query->to_str();
+	invUt();
+	vector<string> rt = templ->to_str(inv_u, inv_t);
+	
+	char buf[200];
+	
+	ofstream fout(savepath.c_str());
+	n = q.size();
+	for (i = 0; i < n && i < 50000; i++){
+		const string& c = q[i];
+		if (0 == c.compare(0, 4, "ATOM")
+			|| 0 == c.compare(0, 6, "HETATM")){
+			if (c.length() > 22){
+				sprintf(buf, "%5d", i);
+				fout << c.substr(0, 6) << buf << c.substr(11, 10) << 'N' << c.substr(22) << endl;
+			}else fout << c << endl; 			
+		}
+	}
+	
+	n = rt.size();
+	for (i = 0; i < n && i < 50000; i++){
+		const string& c = rt[i];
+		if (0 == c.compare(0, 4, "ATOM")
+			|| 0 == c.compare(0, 6, "HETATM")){
+			if (c.length() > 22){
+				sprintf(buf, "%5d", i+50000);
+				fout << c.substr(0, 6) << buf << c.substr(11, 10) << 'M' << c.substr(22) << endl;
+			}else fout << c << endl;
+		}
+	}
+	
+	fout.close();
 }
 
 inline const vector<CHAIN_PAIR>* CBaseFunc::parse_matched_chain_pairs(const string& matched_chain_pair_path){
@@ -13013,6 +12465,21 @@ inline int*** CBaseFunc::new3DIntArr(int row, int col, int thd){
 	return ans;
 }
 
+inline double*** CBaseFunc::new3Darr(int row, int col, int thd){
+	double ***ans=new double**[row];
+	for(int i=0;i<row;i++){
+		ans[i]=new double*[col];
+		for (int j=0; j<col;j++){
+			ans[i][j]=new double[thd];
+			for (int k=0; k<thd; k++){
+				ans[i][j][k] = 0.;
+			}
+		}
+	}
+	
+	return ans;
+}
+
 inline const string& Molecule::get_cared_atomsimpletype_in_lig(const int& i){
 	return m_cared_atomsimpletype_vec[i];
 }
@@ -13032,38 +12499,20 @@ inline void CBaseFunc::delete3DIntArr(int row, int col, int*** Arr){
 	Arr = NULL;
 }
 
+inline void CBaseFunc::delete3Darr(int row, int col, double*** Arr){
+	for(int i = 0; i < row; i++){
+		for (int j = 0; j < col; j++){
+			delete[] Arr[i][j];
+		}
+		delete[] Arr[i];
+	}
+	delete[] Arr;
+	Arr = NULL;
+}
+
 inline const bool LigAtomMatcher::is_same_important(const int& i, const LigAtomMatcher& other, const int& other_i){
 	vector<vector<string>* >& ith = *(attypes_in_roads[i]);
 	vector<vector<string>* >& other_ith = *(other.attypes_in_roads[other_i]);
-	
-//	cout << "DEBUG START" << endl;
-//	int imax = 0;
-//	for (int i = 0; i < ith.size(); i++){
-//		if (imax < (*ith[i]).size())
-//			imax = (*ith[i]).size(); 
-//	}
-//	int omax = 0;
-//	for (int i = 0; i < other_ith.size(); i++){
-//		if (omax < (*other_ith[i]).size())
-//			omax = (*other_ith[i]).size(); 
-//	}
-//	if (imax == omax){
-//		for (int i = 0; i < ith.size(); i++){
-//			for (int j = 0; j < (*ith[i]).size(); j++){
-//				cout << (*ith[i])[j] << ' ';
-//			}
-//			cout << endl;
-//		}
-//		cout << "======" << endl;
-//		for (int i = 0; i < other_ith.size(); i++){
-//			for (int j = 0; j < (*other_ith[i]).size(); j++){
-//				cout << (*other_ith[i])[j] << ' ';
-//			}
-//			cout << endl;
-//		}
-//	}
-//	cout << "DEBUG END" << endl;
-	
 	return CVector::is_same_contents(ith, other_ith, g_lig_match_in_order_or_content);
 }
 
@@ -13245,7 +12694,7 @@ inline void CBaseFunc::print_help(const char* arg){
 	cout << "TM-score-Complex (TM-scoreC) is a quick and accurate algorithm for measuring quality of " << endl
 	     << "complex structure predictions of proteins, nucleic acids, and small molecule ligands." << endl
 	     << endl;
-	cout << " Usage: " << arg << " PDB1.pdb PDB2.pdb [Options]" << endl << endl
+	cout << " Usage: " << arg << " structure_1.pdb structure_2.pdb [Options]" << endl << endl
 		 << " Options:" << endl
 		 << "   -mol      Select molecule types in the inputted pdb files to superimpose. "<< endl 
 		 << "               all (default): superimpose all molecules in inputs." << endl
@@ -13263,9 +12712,10 @@ inline void CBaseFunc::print_help(const char* arg){
 		 << "               pdl          : superimpose proteins, DNAs and ligands in inputs." << endl
 		 << "               prl          : superimpose proteins, RNAs and ligands in inputs." << endl
 		 << "               drl          : superimpose DNAs, RNAs and ligands in inputs." << endl
-		 << "   -s        Select rTM-score or TM-score to search the best superposition." << endl
+		 << "   -s        Select TM-score or rTM-score to search the best superposition." << endl
 		 << "               t (default): use TM-score " << endl
 		 << "               r          : use rTM-score " << endl
+		 << "   -ncpu     Number of cpu thread number, range from 1 to the MAXIMUM in you computer." << endl
 		 << "   -d0       The TM-score scaled by an assigned d0, e.g., '-d0 3.5' reports MaxSub" << endl
 		 << "             score, where d0 is 3.5 Angstrom." 
 		 << "   -da       Is chain order information in two inputted pdb files matched? Note " << endl
@@ -13354,15 +12804,15 @@ inline void CBaseFunc::print_help(const char* arg){
 
 inline void CBaseFunc::print_logo(){
 	cout 
-	<<"================================================================================" << endl
-	<<" ______,__ __                            ___                       _                 " << endl
-	<<"(_) | /|  |  |                          / (_)                     | |                " << endl
-	<<"    |  |  |  |   ,   __   __   ,_    _ |      __   _  _  _     _  | |  _             " << endl
-	<<"  _ |  |  |  |  / \\_/    /  \\_/  |  |/ |     /  \\_/ |/ |/ |  |/ \\_|/  |/  /\\/   " << endl
-	<<" (_/   |  |  |_/ \\/ \\___/\\__/    |_/|__/\\___/\\__/   |  |  |_/|__/ |__/|__/ /\\_/" << endl
-	<<"                                                            /|                       " << endl
-	<<"                                                            \\|                      " << endl
+	<<"========================================================================================" << endl
+	<<"     ______,__ __                            ___                       _                 " << endl
+	<<"    (_) | /|  |  |                          / (_)                     | |                " << endl
+	<<"        |  |  |  |   ,   __   __   ,_    _ |      __   _  _  _     _  | |  _             " << endl
+	<<"      _ |  |  |  |  / \\_/    /  \\_/  |  |/ |     /  \\_/ |/ |/ |  |/ \\_|/  |/  /\\/   " << endl
+	<<"     (_/   |  |  |_/ \\/ \\___/\\__/    |_/|__/\\___/\\__/   |  |  |_/|__/ |__/|__/ /\\_/" << endl
+	<<"                                                                /|                       " << endl
+	<<"                                                                \\|                      " << endl
 	<<"Version of TM-score-Complex (TMscoreC): " << VERSION << endl
 	<<"Please email comments and suggestions to Jun Hu (hj@ism.cams.cn)" << endl
-	<<"================================================================================" << endl << endl;
+	<<"========================================================================================" << endl << endl;
 }

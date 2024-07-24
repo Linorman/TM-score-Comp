@@ -9,23 +9,18 @@ Structural comparison between native and predicted structures is the gold-standa
 
 ~~~
   $ cd TM-score-Comp-main
-  $ chmod 777 ./install.sh
-  $ ./install.sh
+  $ chmod 777 ./make.sh
+  $ ./make.sh
 ~~~
 
-* If the package cannot work correctly on your computational cluster, you should install the dependencies via running the following commands:
-
-~~~
-  $ cd e2eatp-main
-  $ pip install -r requirements.txt
-~~~
+* If you want run TM-score-Comp in Windows System. You can directly run the following execulations xxx.
 
 ## Run example
 ~~~
-  $ python predict.py -sf example/results/ -seq_fa example/seq.fa
+  $ ./exe/TMscoreCmt -h
 ~~~
 
-## Result
+## Description of Result
 
 * The prediction result file (e.g., "3J8YK.pred") of each protein (e.g., 3J8YK) in your input fasta file (-seq_fa) could be found in the folder which you input as "-sf".
 * There are four columns in each prediction result file. The 1st column is the residue index. The 2nd column is the residue type. The 3rd column is the predicted probablity of the corresponding residue belonging to the class of ATP-binding residues. The 4th column is the prediction result ('B' and 'N' mean the predicted ATP-binding and non-ATP-binding residue, respectively). For example:
@@ -54,20 +49,9 @@ Index    AA    Prob.    State
    19     N    0.001    N
 ~~~
 
-## Predicted Database on Uniprot
-* If you have installed this package, you can find that there is a predicted ATP-binding residues database for all 207,892 human proteins in UniProt (up to 2023-07-10).
-
-~~~
-  $ cd e2eatp-main/uniprot/
-~~~
-
-## Update History:
-
-- Add a new data set     2023-11-26
-- First release          2023-07-12
-
-## Tips
+## Important Tips
 
 * <b>This package is only free for academic use</b>. If you have any question, please email Jun Hu: junh_cs@126.com
 
 ## References
+Jun Hu, Weikang Gong, Biao Zhang and Yang Zhang. TM-score-Comp: a quick and accurate tool for assessing quality of complex structure predictions of proteins, nucleic acids, and small molecule ligands. XXXX, XX(XX): XXXX-XXXX.

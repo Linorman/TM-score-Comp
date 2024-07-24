@@ -11,3 +11,5 @@ g++ -static -O3 -ffast-math -lm -o ./exe/TMscoreC ./code/TMscoreC.cpp
 #g++ -o ./exe/TMscoreCmt ./code/TMscoreCmt.cpp
 # If you can not compile them, you should update your g++ version or 
 # directly use the executable of ./exe/TMscoreCmt
+
+chmod -R 777 ./exe/

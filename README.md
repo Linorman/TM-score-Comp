@@ -33,7 +33,7 @@ Structural comparison between native and predicted structures is the gold-standa
 ~~~
 
 ## Description of Result
-xxxx
+[![atlas](figures/output_example.png)]
 
 ## References
 Jun Hu, Weikang Gong, Biao Zhang and Yang Zhang. TM-score-Comp: a quick and accurate tool for assessing quality of complex structure predictions of proteins, nucleic acids, and small molecule ligands. XXXX, XX(XX): XXXX-XXXX.

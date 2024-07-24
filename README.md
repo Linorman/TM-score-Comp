@@ -22,16 +22,18 @@ Structural comparison between native and predicted structures is the gold-standa
 
 ## Run Single-Thread TM-score-Comp
 ~~~
-  $ ./exe/TMscoreC -h
-  or
-  $ ./exe/TMscoreC.exe -h
+  In Linux System
+    $ ./exe/TMscoreC -h
+  or in Windows System
+    $ ./exe/TMscoreC.exe -h
 ~~~
 
 ## Run Multi-Thread TM-score-Comp
 ~~~
-  $ ./exe/TMscoreCmt -h
-  or
-  $ ./exe/TMscoreCmt.exe -h
+  In Linux System
+    $ ./exe/TMscoreCmt -h
+  or in Windows System
+    $ ./exe/TMscoreCmt.exe -h
 ~~~
 
 ## Description of Result

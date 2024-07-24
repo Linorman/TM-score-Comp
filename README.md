@@ -13,7 +13,12 @@ Structural comparison between native and predicted structures is the gold-standa
   $ ./make.sh
 ~~~
 
-* If you want run TM-score-Comp in Windows System. You can directly run the following execulations xxx.
+* If you want run TM-score-Comp in Windows System. You can directly run the following execulations:
+
+~~~
+  > ./exe/TMscoreC.exe
+  > ./exe/TMscoreCmt.exe
+~~~
 
 ## Run example
 ~~~

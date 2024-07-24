@@ -29,7 +29,7 @@ using namespace std;
  * g++ -static -O3 -ffast-math -lm -o TMscoreCmt TMscoreCmt.cpp
  ******************************************************************/ 
 
-const char* VERSION = "V20240712";
+const char* VERSION = "20240724";
 
 typedef enum {
 	PROTEIN, // 0

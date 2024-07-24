@@ -19,7 +19,7 @@ using namespace std;
  * g++ -static -O3 -ffast-math -lm -o TMscoreC TMscoreC.cpp
  ******************************************************************/ 
 
-const char* VERSION = "J20240712";
+const char* VERSION = "20240724";
 
 typedef enum {
 	PROTEIN, // 0
@@ -74,7 +74,7 @@ bool g_use_rtmscore_to_search_best = false; // whether use rtmscore to search be
 bool g_use_chain_order_or_not = false;
 bool g_use_res_orig_index_or_not = false; // record whether directly use the residue/nucletide index in pdb.
 bool g_is_load_H2O = false; // record whether load the H2O (water) molecule.
-double g_seqid_cutoff = 0.3;
+double g_seqid_cutoff = 0.7;
 PRINT_RESULT_TYPE g_print_result_type = DETAIL; // [DO NOT CHANGE IT] required to be DETAIL
 ALIGN_TYPE g_ali_type = NORMAL;
 bool g_go_detail = false;

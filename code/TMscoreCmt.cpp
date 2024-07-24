@@ -83,7 +83,7 @@ bool g_use_rtmscore_to_search_best = false; // whether use rtmscore to search be
 bool g_use_chain_order_or_not = false;
 bool g_use_res_orig_index_or_not = false; // record whether directly use the residue/nucletide index in pdb.
 bool g_is_load_H2O = false; // record whether load the H2O (water) molecule.
-double g_seqid_cutoff = 0.3;
+double g_seqid_cutoff = 0.7;
 PRINT_RESULT_TYPE g_print_result_type = DETAIL; // [DO NOT CHANGE IT] required to be DETAIL
 ALIGN_TYPE g_ali_type = NORMAL;
 bool g_go_detail = false;
@@ -428,6 +428,8 @@ class CBaseFunc {
 		static double**   new2Darr(const int& r, const int& c);
 		static double***  new3Darr(int row, int col, int thd);
 		static void       delete2Darr(double** pMtx, const int& r);
+		static bool       isInit2Darr(double** mtx, const int& r, const int& c);
+		
 		static int**      new2DIntArr(const int& row, const int& col);
 		static void       delete2DIntArr(const int& n, int ** Arr);
 		static bool*      new1Dbool(const int& row);
@@ -1487,6 +1489,9 @@ class CTMscoreComplex {
 		Complex* templ;
 		int qsize;
 		int tsize;
+		
+		double** individual_tmscore_mtx;
+		
 		double tmscore;
 		double rtmscore;
 		double use_seconds;
@@ -1868,8 +1873,8 @@ int main(int argc, char** args) {
 			}
 			
 			i++;
-		}else if (0 == strcmp(args[i], "-of") && i < argc-1){
-			if (0 == strcmp(args[i+1], "d")){
+		}else if (0 == strcmp(args[i], "-odis") && i < argc-1){
+			if (0 == strcmp(args[i+1], "y")){
 				g_is_output_in_detail = true;
 			}else {
 				g_is_output_in_detail = false; 
@@ -1908,10 +1913,10 @@ int main(int argc, char** args) {
 			g_maxmum_number_of_L_init = atoi(args[i+1]);
 			if (g_maxmum_number_of_L_init < 6) g_maxmum_number_of_L_init = 6;
 			i++;
-		}else if (0 == strcmp(args[i], "-pts") && i < argc-1){
+		}else if (0 == strcmp(args[i], "-mode") && i < argc-1){
 			if (0 == strcmp(args[i+1], "suf")){
 				g_ali_type = SUPERFAST;
-			}else if (0 == strcmp(args[i+1], "fst")){
+			}else if (0 == strcmp(args[i+1], "fast")){
 				g_ali_type = FAST;
 			}else if (0 == strcmp(args[i+1], "slw")){
 				g_ali_type = SLOW;
@@ -2045,7 +2050,7 @@ inline void CTMscoreComplex::align_multimer_fast_buf_inaccuracy_using_nwalign_an
 				if (NULL == i2j)
 					continue;
 				
-				CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
+				individual_tmscore_mtx[i][j] = CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
 				for (k = 0; k < this->qsize; k++){
 					Molecule* kmol = (*(this->query))[k];
 					const MOLTYPE& kmt = kmol->get_moltype();
@@ -2223,7 +2228,7 @@ inline void CTMscoreComplex::align_multimer_fast_buf_inaccuracy_using_nwalign_an
 				if (NULL == i2j)
 					continue;
 				
-				CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
+				individual_tmscore_mtx[i][j] = CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
 				for (k = 0; k < this->qsize; k++){
 					Molecule* kmol = (*(this->query))[k];
 					const MOLTYPE& kmt = kmol->get_moltype();
@@ -2407,7 +2412,7 @@ inline void CTMscoreComplex::align_multimer_normal_using_nwalign_and_greadsearch
 					continue;
 				
 				// calculate the u and t
-				CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
+				individual_tmscore_mtx[i][j] = CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
 				for (k = 0; k < qsize; k++){
 					Molecule* kmol = (*(this->query))[k];
 					const MOLTYPE& kmt = kmol->get_moltype();
@@ -2630,7 +2635,7 @@ inline void CTMscoreComplex::align_multimer_normal_using_nwalign_and_greadsearch
 					continue;
 				
 				// calculate the u and t
-				CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
+				individual_tmscore_mtx[i][j] = CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
 				
 				int*** kl_lig_macther = new int**[qsize];
 				for (k = 0; k < qsize; k++)
@@ -2921,6 +2926,7 @@ inline void CTMscoreComplex::align_multimer_normal_using_nwalign_and_greadsearch
 				
 				// calculate the u and t
 				all_single_scomtx[i][j] = CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
+				individual_tmscore_mtx[i][j] = all_single_scomtx[i][j];
 				
 				int*** kl_lig_macther = new int**[qsize];
 				for (k = 0; k < qsize; k++)
@@ -4317,7 +4323,7 @@ inline void CTMscoreComplex::align_multimer_normal_using_nwalign_and_greadsearch
 					continue;
 				
 				// calculate the u and t
-				CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
+				individual_tmscore_mtx[i][j] = CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
 				for (k = 0; k < qsize; k++){
 					Molecule* kmol = (*(this->query))[k];
 					const MOLTYPE kmt = kmol->get_moltype();
@@ -4543,7 +4549,7 @@ inline void CTMscoreComplex::align_multimer_normal_using_nwalign_and_greadsearch
 					continue;
 				
 				// calculate the u and t
-				CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
+				individual_tmscore_mtx[i][j] = CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
 				
 				int*** kl_lig_macther = new int**[qsize];
 				for (k = 0; k < qsize; k++)
@@ -4837,6 +4843,7 @@ inline void CTMscoreComplex::align_multimer_normal_using_nwalign_and_greadsearch
 				
 				// calculate the u and t
 				all_single_scomtx[i][j] = CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
+				individual_tmscore_mtx[i][j] = all_single_scomtx[i][j];
 				
 				int*** kl_lig_macther = new int**[qsize];
 				for (k = 0; k < qsize; k++)
@@ -5577,6 +5584,9 @@ inline void CTMscoreComplex::align_multimer_normal_using_nwalign_and_not_greadse
 		}
 		
 		int* a2b = this->get_ij_qt_match_mtx(i, obj_level_ali[i]);
+		
+		individual_tmscore_mtx[i][obj_level_ali[i]] = CBaseFunc::cal_rot_tran_from_query_to_templ__(axyzs, bxyzs, u, t, this->chain_index_corr_to_query__d0[i], a2b, fast);
+		
 		for (j = 0; j < alen; j++){
 			if (-1 != a2b[j]){
 				aress.push_back(axyzs[j]);
@@ -5686,6 +5696,9 @@ inline void CTMscoreComplex::align_multimer_normal_using_nwalign_and_not_greadse
 			}
 			
 			int* a2b = this->get_ij_qt_match_mtx(i, this->obj_level_ali[i]);
+			
+			individual_tmscore_mtx[i][obj_level_ali[i]] = CBaseFunc::cal_rot_tran_from_query_to_templ__(axyzs, bxyzs, u, t, this->chain_index_corr_to_query__d0[i], a2b, fast);
+			
 			for (j = 0; j < alen; j++){
 				if (-1 != a2b[j]){
 					aress.push_back(axyzs[j]);
@@ -5807,6 +5820,9 @@ inline void CTMscoreComplex::align_multimer_normal_using_not_nwalign_and_not_gre
 		}
 		
 		int* a2b = this->get_ij_qt_match_mtx(i, this->obj_level_ali[i]);
+		
+		individual_tmscore_mtx[i][this->obj_level_ali[i]] = CBaseFunc::cal_rot_tran_from_query_to_templ__(axyzs, bxyzs, u, t, this->chain_index_corr_to_query__d0[i], a2b, fast);
+		
 		for (j = 0; j < alen; j++){
 			if (-1 != a2b[j]){
 				aress.push_back(axyzs[j]);
@@ -5923,6 +5939,7 @@ inline void CTMscoreComplex::align_multimer_normal_using_not_nwalign_and_not_gre
 			}
 			
 			int* a2b = this->get_ij_qt_match_mtx(i, this->obj_level_ali[i]);
+			individual_tmscore_mtx[i][this->obj_level_ali[i]] = CBaseFunc::cal_rot_tran_from_query_to_templ__(axyzs, bxyzs, u, t, this->chain_index_corr_to_query__d0[i], a2b, fast);
 			for (j = 0; j < alen; j++){
 				if (-1 != a2b[j]){
 					aress.push_back(axyzs[j]);
@@ -6013,7 +6030,7 @@ inline void CTMscoreComplex::align_multimer_normal_using_not_nwalign_and_greadse
 					continue;
 				
 				// calculate the u and t
-				CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
+				individual_tmscore_mtx[i][j] = CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
 				
 				for (k = 0; k < this->qsize; k++){
 					Molecule* kmol = (*(this->query))[k];
@@ -6236,7 +6253,7 @@ inline void CTMscoreComplex::align_multimer_normal_using_not_nwalign_and_greadse
 					continue;
 				
 				// calculate the u and t
-				CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
+				individual_tmscore_mtx[i][j] = CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
 				
 				for (k = 0; k < this->qsize; k++){
 					Molecule* kmol = (*(this->query))[k];
@@ -6460,7 +6477,7 @@ inline void CTMscoreComplex::align_multimer_slow_but_accuracy_using_nwalign_and_
 			if (NULL == i2j)
 				continue;
 			
-			CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
+			individual_tmscore_mtx[i][j] = CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
 			
 			for (k = 0; k < qsize; k++){
 				Molecule* kmol = (*(this->query))[k];
@@ -6676,7 +6693,7 @@ inline void CTMscoreComplex::align_multimer_slow_but_accuracy_using_nwalign_and_
 			if (NULL == i2j)
 				continue;
 		
-			CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
+			individual_tmscore_mtx[i][j] = CBaseFunc::cal_rot_tran_from_query_to_templ__(ixyzs, jxyzs, u, t, this->chain_index_corr_to_query__d0[i], i2j, fast);
 			
 			for (k = 0; k < qsize; k++){
 				Molecule* kmol = (*(this->query))[k];
@@ -6894,6 +6911,8 @@ inline CTMscoreComplex::CTMscoreComplex(const string& qpdb, const string& tpdb, 
 	this->templ = new Complex(tpdb);
 	this->qsize = query->size();
 	this->tsize = templ->size();
+	
+	this->individual_tmscore_mtx = CBaseFunc::new2Darr(this->qsize, this->tsize);
 	
 	if (0 == qsize){
 		cout << endl;
@@ -7245,6 +7264,7 @@ inline void CTMscoreComplex::align_monomer(const bool& fast){
 			
 			tmscore = CBaseFunc::cal_rot_tran_from_query_to_templ__(qxyz_vec, txyz_vec, this->u, this->t, d0, fast);
 			rtmscore = tmscore;
+			individual_tmscore_mtx[0][0] = tmscore; 
 			
 			if (DETAIL == g_print_result_type){
 				for (i = 0; i < qmol_len; i++){
@@ -7312,6 +7332,7 @@ inline void CTMscoreComplex::align_monomer(const bool& fast){
 			tmscore = CBaseFunc::cal_rot_tran_from_query_to_templ__(__qxyz_vec, __txyz_vec, this->u, this->t, d0, fast);
 			tmscore = tmscore * identity_num / qmol_len;
 			rtmscore = tmscore;
+			individual_tmscore_mtx[0][0] = tmscore;
 			
 			if (DETAIL == g_print_result_type){
 				int n = __qxyz_vec.size();
@@ -7362,6 +7383,7 @@ inline void CTMscoreComplex::align_monomer(const bool& fast){
 			tmscore = CBaseFunc::cal_rot_tran_from_query_to_templ__(__qxyz_vec, __txyz_vec, this->u, this->t, d0, fast);
 			tmscore = tmscore * identity_num / qmol_len;
 			rtmscore = tmscore;
+			individual_tmscore_mtx[0][0] = tmscore;
 			
 			if (DETAIL == g_print_result_type){
 				int n = __qxyz_vec.size();
@@ -7376,6 +7398,7 @@ inline void CTMscoreComplex::align_monomer(const bool& fast){
 			if (qseq == tseq){
 				tmscore = CBaseFunc::cal_rot_tran_from_query_to_templ__(qxyz_vec, txyz_vec, this->u, this->t, d0, fast);
 				rtmscore = tmscore;
+				individual_tmscore_mtx[0][0] = tmscore;
 				
 				if (DETAIL == g_print_result_type){
 					for (i = 0; i < qmol_len; i++){
@@ -7422,7 +7445,8 @@ inline void CTMscoreComplex::align_monomer(const bool& fast){
 				
 				tmscore = CBaseFunc::cal_rot_tran_from_query_to_templ__(qxyz_vec, txyz_vec, this->u, this->t, d0, __i2j_x_, fast);
 				tmscore = tmscore * identity_num / qmol_len;
-				rtmscore = tmscore;	
+				rtmscore = tmscore;
+				individual_tmscore_mtx[0][0] = tmscore;
 				
 				if (DETAIL == g_print_result_type){
 					const int* ali = __i2j_x_;
@@ -7470,6 +7494,7 @@ inline CTMscoreComplex::~CTMscoreComplex(){
 	CBaseFunc::delete2Darr(u, 3);
 	delete[] t;
 	delete[] obj_level_ali;
+	CBaseFunc::delete2Darr(individual_tmscore_mtx, this->qsize);
 	
 	if (NULL != inv_u){
 		CBaseFunc::delete2Darr(inv_u, 3);
@@ -8474,6 +8499,19 @@ inline double** CBaseFunc::new2Darr(const int& r, const int& c){
 	}
 
 	return ans;
+}
+
+inline bool CBaseFunc::isInit2Darr(double** mtx, const int& r, const int& c){
+	int i, j;
+	for (i = 0; i < r; i++){
+		for (j = 0; j < c; j++){
+			if (fabs(mtx[i][j]) > g_eps){
+				return false;
+			}
+		}
+	}
+	
+	return true;
 }
 
 /*******************************************************
@@ -11899,6 +11937,12 @@ inline void CTMscoreComplex::save_superposition_ditances(const string& savepath)
 
 
 inline void CTMscoreComplex::print_result(){
+	if (CBaseFunc::isInit2Darr(this->individual_tmscore_mtx, this->qsize, this->tsize)){
+		cout << "There is an issue for \"individual_tmscore_mtx\", please send the two complex structures you inputted to junh_cs@126.com." << endl;
+		cout << "We will be very grateful to you!!!" << endl;
+		exit(1);
+	} 
+	
 	CBaseFunc::print_logo();
 	 
 	int i, j, n;
@@ -12107,7 +12151,7 @@ inline void CTMscoreComplex::print_result(){
 			cout << buf << tlig_types[i] << " (" << tlig_atnums[i] << " atoms)" << endl;
 		}
 	}
-	cout << endl;
+	cout << endl << endl;
 	
 	cout << "Molecule mapping information: " << endl;
 	cout << "  >Molecule in Structure 1: ";
@@ -12143,7 +12187,19 @@ inline void CTMscoreComplex::print_result(){
 		double d02 = chain_d02[ap.qchain];
 		chain_tmscore[ap.qchain] += 1./(1. + dis2 / d02);
 	}
-	cout << "  ------" << endl;
+	cout << endl << endl;
+	
+	cout << "TM-score of each pair of mapped molecules calculated using individual rotation matrix" << endl;
+	for (i = 0; i < qsize; i++){
+		if (-1 != obj_level_ali[i]){
+			double individual_tmsco = this->individual_tmscore_mtx[i][obj_level_ali[i]];
+			sprintf(buf, "  >TM-score between %s(in Structure 1) and %s(in Structure 2): %8.6f", query->get_chain(i).c_str(), templ->get_chain( obj_level_ali[i]).c_str(), individual_tmsco);
+			cout << buf << endl; 
+		}
+	}
+	cout << endl << endl;
+	
+	cout << "TM-score of each pair of mapped molecules calculated using complex rotation matrix" << endl;
 	for (i = 0; i < qsize; i++){
 		if (-1 != obj_level_ali[i]){
 			double tmsco = chain_tmscore[query->get_chain(i)];
@@ -12156,7 +12212,7 @@ inline void CTMscoreComplex::print_result(){
 	}
 	cout << endl << endl;
 	
-	cout << "rTM-score(n): maximum rTM-score on n aligned chain pairs" << endl;
+	cout << "rTM-score(n): calculated using the highest n TM-scores in the previous region" << endl;
 	n = chain_tmscore.size();
 	vector<string> chains;
 	double* tmscore_arr = new double[n];
@@ -12188,23 +12244,25 @@ inline void CTMscoreComplex::print_result(){
 	delete[] tmscore_arr;
 	cout << endl << endl;
 	
+	cout << "Final metrics for complex structures of Structure 1 and Structure 2:" << endl;
 	double itmscore = calcluate_itmscore(g_interact_dis_cut_pow2);
 	if (0 > itmscore){
 		if (is_all_qchain_matched)
-			sprintf(buf, "TM-score: %8.6f, rTM-score: %8.6f, iTM-score: n/a", tmscore, rtmscore);
-		else sprintf(buf, "TM-score: %8.6f, rTM-score: n/a, iTM-score: n/a", tmscore);
+			sprintf(buf, "  >TM-score: %8.6f, rTM-score: %8.6f, iTM-score: n/a", tmscore, rtmscore);
+		else sprintf(buf, "  >TM-score: %8.6f, rTM-score: n/a, iTM-score: n/a", tmscore);
 		cout << buf << endl;
 	}else {
 		if (is_all_qchain_matched){
-			sprintf(buf, "TM-score: %8.6f, rTM-score: %8.6f, iTM-score: %8.6f", tmscore, rtmscore, itmscore);
+			sprintf(buf, "  >TM-score: %8.6f, rTM-score: %8.6f, iTM-score: %8.6f", tmscore, rtmscore, itmscore);
 			cout << buf << endl;
 		}else{
-			sprintf(buf, "TM-score: %8.6f, rTM-score: n/a, iTM-score: %8.6f", tmscore, itmscore);
+			sprintf(buf, "  >TM-score: %8.6f, rTM-score: n/a, iTM-score: %8.6f", tmscore, itmscore);
 			cout << buf << endl;
 		} 
 	}
-	cout << endl;
-	cout << "Rotation Matrix (rotate Structure 2 to Structure 1):" << endl;
+	cout << endl << endl;
+	
+	cout << "Complex Rotation Matrix (rotate Structure 2 to Structure 1):" << endl;
 	vector<string> inv_ut_vec = formatInvRotMtx();
 	n = inv_ut_vec.size();
 	for (i = 0; i < n; i++)
@@ -12289,8 +12347,8 @@ inline void CTMscoreComplex::print_result(){
 			cout << "----------------------------------------------------------------------------" << endl;
 		}
 	}
-	cout << endl;
-	cout << "Taking " << setprecision(8) << use_seconds << " seconds totally." << endl;
+	cout << endl << endl;
+	cout << "Taking " << setprecision(8) << use_seconds << " seconds in total." << endl;
 }
 
 
@@ -12691,7 +12749,7 @@ inline double CBaseFunc::rmsd(const vector<double>& dis2_vec){
 inline void CBaseFunc::print_help(const char* arg){
 	CBaseFunc::print_logo();
 	
-	cout << "TM-score-Complex (TM-scoreC) is a quick and accurate algorithm for measuring quality of " << endl
+	cout << "TM-score-Comp (TM-scoreC) is a quick and accurate algorithm for measuring quality of " << endl
 	     << "complex structure predictions of proteins, nucleic acids, and small molecule ligands." << endl
 	     << endl;
 	cout << " Usage: " << arg << " structure_1.pdb structure_2.pdb [Options]" << endl << endl
@@ -12713,88 +12771,83 @@ inline void CBaseFunc::print_help(const char* arg){
 		 << "               prl          : superimpose proteins, RNAs and ligands in inputs." << endl
 		 << "               drl          : superimpose DNAs, RNAs and ligands in inputs." << endl
 		 << "   -s        Select TM-score or rTM-score to search the best superposition." << endl
-		 << "               t (default): use TM-score " << endl
-		 << "               r          : use rTM-score " << endl
+		 << "               t (default and strongly suggested): use TM-score " << endl
+		 << "               r                                 : use rTM-score " << endl
 		 << "   -ncpu     Number of cpu thread number, range from 1 to the MAXIMUM in you computer." << endl
 		 << "   -d0       The TM-score scaled by an assigned d0, e.g., '-d0 3.5' reports MaxSub" << endl
-		 << "             score, where d0 is 3.5 Angstrom." 
-		 << "   -da       Is chain order information in two inputted pdb files matched? Note " << endl
+		 << "             score, where d0 is 3.5 Angstrom." << endl
+		 << "   -da       Is molecule order information in two inputted pdb files matched? Note " << endl
 		 << "             that, only one of the options of '-ia', and '-da y' can be applied at " << endl 
 		 << "             the same time." << endl
-		 << "               y          : using chain order to generate the chain alignment " << endl
-		 << "                            directly." << endl 
-		 << "               n (default): using greedy search to ensure the chain alignment." << endl
-		 << "   -ia       Input chain alignment txt file path (see detail in README). Note " << endl
-		 << "             that, only one of the options of '-ia', and '-da y' can be applied " << endl 
-		 << "             at the same time." << endl
-		 << "   -ri       Are residue/nucletide indexes of the homologous protein/DNA/RNA" << endl
+		 << "               y          : using molecule order in inputted files to generate molecule mapping" << endl
+		 << "               n (default): genrating molecule mapping automatically" << endl
+		 << "   -ia       Input molecule mapping txt file path (see detail in README). Note that" << endl
+		 << "             only one of the options of '-ia', and '-da y' can be applied at once" << endl 
+		 << "   -ri       Are residue/nucletide/atom indexes of the homologous protein/DNA(RNA)/ligand" << endl
 		 << "             molecules in the inputted pdb files matched?" << endl
-		 << "               y          : using the matched residue/nucletide indexes to generate" << endl
-		 << "                            the residue alignment directly for all homolous protein" << endl
-		 << "                            /DNA/RNA molecules." << endl
- 		 << "               n (default): using sequence aligment tool, i.e., NW-align, to ensure" << endl
- 		 << "                            residue alignment in homologous protein/DNA/RNA molecules" << endl 
- 		 << "                            once." << endl 
-		 << "   -wt       Whether load water molecules in inputted pdb files or not?" << endl
-		 << "               y          : load water molecules in inputted pdb files." << endl
- 		 << "               n (default): do not load water molecules in inputted pdb files." << endl
- 		 << "   -of       Select the format type of the direct output in the command line window." << endl
- 		 << "               r (default): normal output format in the command window, which  " << endl
- 		 << "                            donot contain residue/nucletide/atom level superimpose " << endl
- 		 << "                            information in detial." << endl
- 		 << "               d          : detial output format in the command window, which gives" << endl
- 		 << "                            all superimpose information in detial." << endl
- 		 << "   -sid      When option of \"-ri\" is set to 'n', this option can be selected to " << endl
-		 << "             set the sequence identity cutoff (**default: 0.3**, range from 0 to" << endl
+		 << "               y          : using the matched residue/nucleotide/atom indexes to generate" << endl
+		 << "                            the residue/nucletide/atom assignment directly for all homolous " << endl
+		 << "                            protein/DNA(RNA)/ligand molecules." << endl
+ 		 << "               n (default): using global sequence aligment tool, i.e., NW-align, to generate" << endl
+ 		 << "                            residue/nucleotide alignment in homologous protein/DNA(RNA) molecules" << endl 
+ 		 << "                            once and using the atom mapping algorithm (see Manuscript) to generated" << endl
+		 << "                            the atom mapping for ligands." << endl 
+		 << "   -sid      When option of \"-ri\" is set to 'n', this option can be selected to " << endl
+		 << "             set the global sequence identity cutoff (**default: 0.7**, range from 0 to" << endl
 		 << "             1), which is used to ensure wheter two molecule sequence is homologous " << endl
 		 << "             or not. When NWalign-outputted global sequence identity value is larger" << endl
 		 << "             than the inputted cutoff, the corresponding sequences will be looked as " << endl 
-		 << "             homologous with each other." << endl
-		 << "   -pts      Procedures types of superimposing molecule complex structures, which can " << endl
-		 << "             imfact the speed and accuracy of the final superimposed results." << endl 
-		 << "               fst          : in average, the speed is the second fastest one, the " << endl
-		 << "                              accuracy is lower than that of 'nml'" << endl 
-		 << "               nml (default): in average, the speed is normal, the xxx should be the best" << endl
-		 << "               acc          : in averagem the speed is slow, the chain mapping should be the best" << endl
+		 << "             homologous with each other. In TM-score-Comp, only homologous molecules "<< endl
+		 << "             can matched each other." << endl
+		 << "   -wt       Whether load water molecules in inputted pdb files or not?" << endl
+		 << "               y          : load water molecules in inputted pdb files." << endl
+ 		 << "               n (default): do not load water molecules in inputted pdb files." << endl
+ 		 << "   -odis     Whether  directly output the distance information in detail between each "<<endl
+		 << "             pair of the mapped elements of residues for protein, nucletides for DNAs "<<endl
+		 <<"              and RNAs and atoms for ligands in the command line window." << endl
+ 		 << "               y          : output the distances of mapped residues/nucletides/atoms in detial" << endl
+ 		 << "               n (default): donot output the distances of mapped residues/nucletides/atoms." << endl
+		 << "   -mode     Modes of TM-score-Comp, which can imfact the speed and accuracy of the final superimposed " << endl
+		 << "             results." << endl 
+		 << "               fast            : in average, the speed and accuracy are faster and slightly lower than " << endl
+		 << "                                 those of 'normal', respectively" << endl 
+		 << "               normal (default): the normal model of TM-score-Comp" << endl
 		 << "   -atom-nuc 4-character atom name used to represent a nucletide. Default is \" C3'\" for " << endl
 		 << "             DNA/RNA (note the space before C3')." << endl
 		 << "             PLEASE MAKE SURE THAT THE ATOM TYPE EXISTS IN EVERY NUCLETIDE." << endl
 		 << "   -atom-res 4-character atom name used to represent a residue. Default is \" CA \" for " << endl
 		 << "             protein (note the spaces before and after CA)." << endl
 		 << "             PLEASE MAKE SURE THAT THE ATOM TYPE EXISTS IN EVERY AMINO ACID RESIDUE." << endl
-		 << "   -nit      Set value of maximum iteration number in the original TM-score program," << endl
+		 << "   -nit      Set maximum iteration number in the original TM-score program," << endl
 		 << "             range from 20 to positive infinity, default is 20." << endl
 		 << "             ** NOTE THAT, THIS OPTION MAY INCREACE THE RUNING TIME, PLEASE MAKE SURE" << endl
 		 << "             THAT YOU WANT MORE ITERATION TIMES, WHICH MAY GIVE YOU A HIGH SCORE VALUE." << endl
-		 << "   -nLinit   Set value of maximum number of L_init in the original TM-score program," << endl 
+		 << "   -nLinit   Set maximum number of L_init in the original TM-score program," << endl 
 		 << "             range from 6 to positive infinity, default is 6." << endl
 		 << "             ** NOTE THAT, THIS OPTION MAY INCREACE THE RUNING TIME, PLEASE MAKE SURE" << endl
 		 << "             THAT YOU WANT MORE L_init NUMBER, WHICH MAY GIVE YOU A HIGH SCORE VALUE." << endl
 		 << "   -clig     Whether re-mapping ligand atom pairs in every scoring time or just at begining." << endl 
-		 << "             Note that, this option is just worked on \"-pts nml\", and cannot worked with " << endl
+		 << "             Note that, this option is just worked on \"-mode normal\", and cannot worked with " << endl
 		 << "             options of \"-ia\", \"-da y\", and \"-ri y\"" << endl
 		 << "               y (defualt): re-mapping ligand atom pair in every scoring time." << endl
 		 << "               n          : re-mapping ligand atom pair just at begining." << endl
 		 << "   -o        Save the 2nd inputed complex structure after superposition to file." << endl
-		 << "   -srm      Save the rotation matrix to file." << endl
+		 << "   -srm      Save the complex rotation matrix to file." << endl
 		 << "   -ssp      Save the detail superposition information to file." << endl
 		 << "   -h        print this help" << endl << endl
 		 << " Extra Function Option:" << endl
 		 << "   -cif2pdb: Transfer the molecule coordinates in \".cif\" file to \".pdb\" file." << endl
 		 << "             If you only have the \".cif\" format for for your molecule coordina-" << endl
-		 << "             tes. Note that, if you use this option,this program will not superi-" << endl
-		 << "             mpose molecule structures and the following options will not work. " << endl
-		 << "             The new usage is as follows:" << endl
+		 << "             tes. Note that, if you use this option, this program will not superi-" << endl
+		 << "             mpose molecule structures and the previous options will not work. " << endl
+		 << "             The new usage of this option is as follows:" << endl
 		 << "               >" << arg << " -cif2pdb PDB.cif PDB.pdb" << endl << endl
 		 << " Example usages:" << endl
 		 << "    "<< arg <<" native.pdb predicted.pdb" << endl
 		 << "    "<< arg <<" native.pdb predicted.pdb -mol all" << endl
-		 << "    "<< arg <<" native.pdb predicted.pdb -s t" << endl
 		 << "    "<< arg <<" native.pdb predicted.pdb -da y" << endl
 		 << "    "<< arg <<" native.pdb predicted.pdb -ia chain_align.txt" << endl
 		 << "    "<< arg <<" native.pdb predicted.pdb -ri y" << endl
-		 << "    "<< arg <<" native.pdb predicted.pdb -wt n" << endl
-		 << "    "<< arg <<" native.pdb predicted.pdb -of d" << endl
 		 << "    "<< arg <<" native.pdb predicted.pdb -sid 0.9" << endl
 		 << "    "<< arg <<" native.pdb predicted.pdb -o rotatted_predicted.pdb" << endl
 		 << "    "<< arg <<" -h"<< endl
@@ -12802,17 +12855,32 @@ inline void CBaseFunc::print_help(const char* arg){
 	exit(1);
 }
 
+//inline void CBaseFunc::print_logo(){
+//	cout 
+//	<<"================================================================================" << endl
+//	<<" ______,__ __                            ___                       _                 " << endl
+//	<<"(_) | /|  |  |                          / (_)                     | |                " << endl
+//	<<"    |  |  |  |   ,   __   __   ,_    _ |      __   _  _  _     _  | |  _             " << endl
+//	<<"  _ |  |  |  |  / \\_/    /  \\_/  |  |/ |     /  \\_/ |/ |/ |  |/ \\_|/  |/  /\\/   " << endl
+//	<<" (_/   |  |  |_/ \\/ \\___/\\__/    |_/|__/\\___/\\__/   |  |  |_/|__/ |__/|__/ /\\_/" << endl
+//	<<"                                                            /|                       " << endl
+//	<<"                                                            \\|                      " << endl
+//	<<"Version of TM-score-Complex (TMscoreC): " << VERSION << endl
+//	<<"Please email comments and suggestions to Jun Hu (hj@ism.cams.cn)" << endl
+//	<<"================================================================================" << endl << endl;
+//}
+
 inline void CBaseFunc::print_logo(){
 	cout 
 	<<"========================================================================================" << endl
-	<<"     ______,__ __                            ___                       _                 " << endl
-	<<"    (_) | /|  |  |                          / (_)                     | |                " << endl
-	<<"        |  |  |  |   ,   __   __   ,_    _ |      __   _  _  _     _  | |  _             " << endl
-	<<"      _ |  |  |  |  / \\_/    /  \\_/  |  |/ |     /  \\_/ |/ |/ |  |/ \\_|/  |/  /\\/   " << endl
-	<<"     (_/   |  |  |_/ \\/ \\___/\\__/    |_/|__/\\___/\\__/   |  |  |_/|__/ |__/|__/ /\\_/" << endl
-	<<"                                                                /|                       " << endl
-	<<"                                                                \\|                      " << endl
-	<<"Version of TM-score-Complex (TMscoreC): " << VERSION << endl
+	<<"             ______,__ __                            ___                      " << endl
+	<<"            (_) | /|  |  |                          / (_)                     " << endl
+	<<"                |  |  |  |   ,   __   __   ,_    _ |      __   _  _  _     _  " << endl
+	<<"              _ |  |  |  |  / \\_/    /  \\_/  |  |/ |     /  \\_/ |/ |/ |  |/ \\" << endl
+	<<"             (_/   |  |  |_/ \\/ \\___/\\__/    |_/|__/\\___/\\__/   |  |  |_/|__/ " << endl
+	<<"                                                                        /|                       " << endl
+	<<"                                                                        \\|                      " << endl
+	<<"Version of TM-score-Comp (TMscoreC): " << VERSION << endl
 	<<"Please email comments and suggestions to Jun Hu (hj@ism.cams.cn)" << endl
 	<<"========================================================================================" << endl << endl;
 }

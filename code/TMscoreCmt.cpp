@@ -11892,7 +11892,7 @@ inline void CTMscoreComplex::save_invUt(const string& savepath){
 
 inline void CTMscoreComplex::save_superposition_ditances(const string& savepath){
 	ofstream fout(savepath.c_str());
-	fout << "Detail alignment information: " << endl;
+	fout << "Detail superposition information: " << endl;
 	fout << "----------------------------------------------------------------------------" << endl;
 	fout << "               Structure 1                                Structure 2       " << endl;
 	fout << "        --------------------------                --------------------------" << endl;
@@ -12270,7 +12270,7 @@ inline void CTMscoreComplex::print_result(){
 	
 	if (g_is_output_in_detail){
 		cout << endl << endl;
-		cout << "Detail alignment information: " << endl;
+		cout << "Detail superposition information: " << endl;
 	
 		if (0 == qlig_num || 0 == tlig_num){
 			cout << "------------------------------------------------------------------" << endl;
@@ -12288,6 +12288,7 @@ inline void CTMscoreComplex::print_result(){
 		
 		n = this->aa_level_ali.size();
 		for (i = 0; i < n; i++){
+			
 			ALIGN_PAIR ap = this->aa_level_ali[i];
 			
 			double dis = sqrt(ap.dis2);

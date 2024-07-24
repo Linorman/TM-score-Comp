@@ -13,60 +13,29 @@ Structural comparison between native and predicted structures is the gold-standa
   $ ./make.sh
 ~~~
 
-* If you want run TM-score-Comp in Windows System. You can directly run the following execulations:
-
-~~~
-  > ./exe/TMscoreC.exe
-  > ./exe/TMscoreCmt.exe
-~~~
+* If you want run TM-score-Comp in Windows System. You can directly run the files of "./exe/TMscoreC.exe" or "./exe/TMscoreCmt.exe".
 
 ## Run Single-Thread TM-score-Comp
 ~~~
   In Linux System
-    $ ./exe/TMscoreC -h
+  $ ./exe/TMscoreC -h
+
   or in Windows System
-    $ ./exe/TMscoreC.exe -h
+  $ ./exe/TMscoreC.exe -h
 ~~~
 
 ## Run Multi-Thread TM-score-Comp
 ~~~
   In Linux System
-    $ ./exe/TMscoreCmt -h
+  $ ./exe/TMscoreCmt -h
   or in Windows System
-    $ ./exe/TMscoreCmt.exe -h
+  $ ./exe/TMscoreCmt.exe -h
 ~~~
 
 ## Description of Result
-
-* The prediction result file (e.g., "3J8YK.pred") of each protein (e.g., 3J8YK) in your input fasta file (-seq_fa) could be found in the folder which you input as "-sf".
-* There are four columns in each prediction result file. The 1st column is the residue index. The 2nd column is the residue type. The 3rd column is the predicted probablity of the corresponding residue belonging to the class of ATP-binding residues. The 4th column is the prediction result ('B' and 'N' mean the predicted ATP-binding and non-ATP-binding residue, respectively). For example:
-
-~~~
-Index    AA    Prob.    State
-    0     A    0.001    N
-    1     E    0.000    N
-    2     S    0.007    N
-    3     N    0.001    N
-    4     I    0.000    N
-    5     K    0.000    N
-    6     V    0.000    N
-    7     M    0.003    N
-    8     C    0.000    N
-    9     R    0.984    B
-   10     F    0.000    N
-   11     R    0.993    B
-   12     P    0.990    B
-   13     L    0.001    N
-   14     N    0.001    N
-   15     E    0.000    N
-   16     S    0.005    N
-   17     E    0.000    N
-   18     V    0.000    N
-   19     N    0.001    N
-~~~
+xxxx
 
 ## Important Tips
-
 * <b>This package is only free for academic use</b>. If you have any question, please email Jun Hu: junh_cs@126.com
 
 ## References

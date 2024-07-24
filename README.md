@@ -1,4 +1,4 @@
-![atlas](figures/logo-v3.png)
+![atlas](figures/logo.png)
 # TM-score-Comp
 TM-score-Comp: a quick and accurate algorithm for measuring quality of complex structure predictions of proteins, nucleic acids, and small molecule ligands
 

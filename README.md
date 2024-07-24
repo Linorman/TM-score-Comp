@@ -36,7 +36,7 @@ Structural comparison between native and predicted structures is the gold-standa
   $ ./exe/TMscoreCmt.exe ./example/pdb.pdb ./example/pred.pdb
 ~~~
 
-## Description of Result
+## Example of Result
 ![atlas](figures/output_example.png)
 
 ## References

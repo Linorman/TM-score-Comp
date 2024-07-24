@@ -5,7 +5,7 @@ Structural comparison between native and predicted structures is the gold-standa
 
 ## Installation:
 
-* Download this repository at https://github.com/jun-csbio/e2eatp.git. Then, uncompress it and run the following command lines on Linux System.
+* Download this repository at https://github.com/jun-csbio/TM-score-Complex.git. Then, uncompress it and run the following command lines on Linux System.
 
 ~~~
   $ cd e2eatp-main

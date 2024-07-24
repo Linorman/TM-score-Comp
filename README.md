@@ -8,7 +8,7 @@ Structural comparison between native and predicted structures is the gold-standa
 * Download this repository at https://github.com/jun-csbio/TM-score-Comp.git. Then, uncompress it and run the following command lines on Linux System.
 
 ~~~
-  $ cd e2eatp-main
+  $ cd TM-score-Comp-main
   $ chmod 777 ./install.sh
   $ ./install.sh
 ~~~

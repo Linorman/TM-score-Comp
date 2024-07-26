@@ -41,8 +41,7 @@ Structural comparison between native and predicted structures is the gold-standa
 ![atlas](figures/output_example.png)
 
 ## Contributing
-If you encounter problems using OpenFold, feel free to create an issue! We also
-welcome pull requests from the community.
+If you encounter problems using TM-score-Comp, feel free to create an issue! We also welcome pull requests from the community.
 
 ## References
 Jun Hu, Weikang Gong, Biao Zhang and Yang Zhang. TM-score-Comp: a quick and accurate tool for assessing quality of complex structure predictions of proteins, nucleic acids, and small molecule ligands. XXXX, XX(XX): XXXX-XXXX.

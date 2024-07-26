@@ -1455,11 +1455,11 @@ inline vector<INTERFACE_PAIR> Complex::parse_interface_pair(const double& intera
 	int size = this->size();
 	for (int i = 0; i < size; i++){
 		Molecule* imol = (*this)[i];
-		const string ichain = m_chains[i];
+		const string ichain = this->get_chain(i);
 		int isize = imol->size();
 		for (int j = i+1; j < size; j++){
 			Molecule* jmol = (*this)[j];	
-			const string jchain = m_chains[j];
+			const string jchain = this->get_chain(j);
 			int jsize = jmol->size();
 			
 			for (int k = 0; k < isize; k++){

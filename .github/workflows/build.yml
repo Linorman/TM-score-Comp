@@ -1,0 +1,253 @@
+name: build-multi-arch
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: linux-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [ x86_64, aarch64 ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cross compiler (aarch64)
+        if: matrix.arch == 'aarch64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-aarch64-linux-gnu
+
+      - name: Build (x86_64)
+        if: matrix.arch == 'x86_64'
+        run: |
+          mkdir -p build/linux-x86_64
+          CXXFLAGS="-O3 -ffast-math -std=c++17" \
+          g++ $CXXFLAGS -pthread -o build/linux-x86_64/TMscoreC code/TMscoreC.cpp
+          CXXFLAGS="-O3 -ffast-math -std=c++17" \
+          g++ $CXXFLAGS -pthread -o build/linux-x86_64/TMscoreCmt code/TMscoreCmt.cpp
+
+      - name: Build (aarch64)
+        if: matrix.arch == 'aarch64'
+        run: |
+          mkdir -p build/linux-aarch64
+          CXXFLAGS="-O3 -ffast-math -std=c++17" \
+          aarch64-linux-gnu-g++ $CXXFLAGS -pthread -o build/linux-aarch64/TMscoreC code/TMscoreC.cpp
+          CXXFLAGS="-O3 -ffast-math -std=c++17" \
+          aarch64-linux-gnu-g++ $CXXFLAGS -pthread -o build/linux-aarch64/TMscoreCmt code/TMscoreCmt.cpp
+
+      - name: Rename to requested artifact names
+        run: |
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            mkdir -p dist/linux-x86
+            cp build/linux-x86_64/TMscoreC dist/linux-x86/
+            cp build/linux-x86_64/TMscoreCmt dist/linux-x86/
+          else
+            mkdir -p dist/linux-arm
+            cp build/linux-aarch64/TMscoreC dist/linux-arm/
+            cp build/linux-aarch64/TMscoreCmt dist/linux-arm/
+          fi
+
+      - name: Upload artifact (x86_64)
+        if: matrix.arch == 'x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86
+          path: dist/linux-x86/*
+
+      - name: Upload artifact (aarch64)
+        if: matrix.arch == 'aarch64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm
+          path: dist/linux-arm/*
+
+  macos:
+    name: macos-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14
+            artifact: macos-apple-silicon
+          - arch: x86_64
+            runner: macos-13
+            artifact: macos-x86
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build (macOS ${{ matrix.arch }})
+        run: |
+          mkdir -p build/macos-${{ matrix.arch }}
+          CXXFLAGS="-O3 -ffast-math -std=c++17 -arch ${{ matrix.arch }}" \
+          clang++ $CXXFLAGS -pthread -o build/macos-${{ matrix.arch }}/TMscoreC code/TMscoreC.cpp
+          CXXFLAGS="-O3 -ffast-math -std=c++17 -arch ${{ matrix.arch }}" \
+          clang++ $CXXFLAGS -pthread -o build/macos-${{ matrix.arch }}/TMscoreCmt code/TMscoreCmt.cpp
+
+      - name: Prepare artifact dir
+        run: |
+          mkdir -p dist/${{ matrix.artifact }}
+          cp build/macos-${{ matrix.arch }}/TMscoreC dist/${{ matrix.artifact }}/
+          cp build/macos-${{ matrix.arch }}/TMscoreCmt dist/${{ matrix.artifact }}/
+
+      - name: Upload artifact (macOS ${{ matrix.arch }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}/*
+
+  windows:
+    name: windows-${{ matrix.arch }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [ x86, arm64 ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Build 32-bit (x86) using MSYS2 MinGW-w64 (MINGW32)
+      - name: Setup MSYS2 (x86)
+        if: matrix.arch == 'x86'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          install: >-
+            mingw-w64-i686-gcc
+            mingw-w64-i686-gcc-libs
+            mingw-w64-i686-headers
+            make
+
+      - name: Build (Windows x86, MinGW32)
+        if: matrix.arch == 'x86'
+        shell: msys2 {0}
+        run: |
+          mkdir -p build/win-x86
+          CXXFLAGS="-O3 -ffast-math -std=gnu++17" \
+          g++ $CXXFLAGS -static-libgcc -static-libstdc++ -o build/win-x86/TMscoreC.exe code/TMscoreC.cpp
+          CXXFLAGS="-O3 -ffast-math -std=gnu++17" \
+          g++ $CXXFLAGS -static-libgcc -static-libstdc++ -pthread -o build/win-x86/TMscoreCmt.exe code/TMscoreCmt.cpp
+
+      - name: Upload artifact (Windows x86)
+        if: matrix.arch == 'x86'
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-x86
+          path: build/win-x86/*
+
+      # Build ARM64 Windows using llvm-mingw (cross-compile on x64 runner)
+      - name: Download llvm-mingw (cross toolchain)
+        if: matrix.arch == 'arm64'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '20240512'
+          $zip = "llvm-mingw-$version-msvcrt-x86_64.zip"
+          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$version/$zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive $zip -DestinationPath $PWD
+          echo "${PWD}\llvm-mingw-$version-msvcrt-x86_64\bin" | Out-File -FilePath $Env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build (Windows ARM64 using aarch64-w64-mingw32-g++)
+        if: matrix.arch == 'arm64'
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path build/win-arm -Force | Out-Null
+          $env:CXXFLAGS = '-O3 -ffast-math -std=gnu++17'
+          aarch64-w64-mingw32-g++ $env:CXXFLAGS -static-libgcc -static-libstdc++ -o build/win-arm/TMscoreC.exe code/TMscoreC.cpp
+          aarch64-w64-mingw32-g++ $env:CXXFLAGS -static-libgcc -static-libstdc++ -pthread -o build/win-arm/TMscoreCmt.exe code/TMscoreCmt.cpp
+
+      - name: Upload artifact (Windows ARM64)
+        if: matrix.arch == 'arm64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-arm
+          path: build/win-arm/*
+
+  release:
+    name: publish-release
+    runs-on: ubuntu-latest
+    needs: [ linux, macos, windows ]
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifact linux-x86
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-x86
+          path: release/linux-x86
+
+      - name: Download artifact linux-arm
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-arm
+          path: release/linux-arm
+
+      - name: Download artifact macos-apple-silicon
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-apple-silicon
+          path: release/macos-apple-silicon
+
+      - name: Download artifact macos-x86
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-x86
+          path: release/macos-x86
+
+      - name: Download artifact win-x86
+        uses: actions/download-artifact@v4
+        with:
+          name: win-x86
+          path: release/win-x86
+
+      - name: Download artifact win-arm
+        uses: actions/download-artifact@v4
+        with:
+          name: win-arm
+          path: release/win-arm
+
+      - name: Install zip
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip
+
+      - name: Package assets
+        run: |
+          cd release
+          zip -j TM-score-Comp-linux-x86.zip linux-x86/*
+          zip -j TM-score-Comp-linux-arm.zip linux-arm/*
+          zip -j TM-score-Comp-macos-apple-silicon.zip macos-apple-silicon/*
+          zip -j TM-score-Comp-macos-x86.zip macos-x86/*
+          zip -j TM-score-Comp-win-x86.zip win-x86/*
+          zip -j TM-score-Comp-win-arm.zip win-arm/*
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/TM-score-Comp-linux-x86.zip
+            release/TM-score-Comp-linux-arm.zip
+            release/TM-score-Comp-macos-apple-silicon.zip
+            release/TM-score-Comp-macos-x86.zip
+            release/TM-score-Comp-win-x86.zip
+            release/TM-score-Comp-win-arm.zip
+          generate_release_notes: true

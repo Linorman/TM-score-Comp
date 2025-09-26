@@ -35,29 +35,29 @@ jobs:
         run: |
           mkdir -p build/linux-x86_64
           CXXFLAGS="-O3 -ffast-math -std=c++17" \
-          g++ $CXXFLAGS -pthread -o build/linux-x86_64/TMscoreC code/TMscoreC.cpp
+          g++ $CXXFLAGS -pthread -o build/linux-x86_64/TMscoreC-linux-x86_64 code/TMscoreC.cpp
           CXXFLAGS="-O3 -ffast-math -std=c++17" \
-          g++ $CXXFLAGS -pthread -o build/linux-x86_64/TMscoreCmt code/TMscoreCmt.cpp
+          g++ $CXXFLAGS -pthread -o build/linux-x86_64/TMscoreCmt-linux-x86_64 code/TMscoreCmt.cpp
 
       - name: Build (aarch64)
         if: matrix.arch == 'aarch64'
         run: |
           mkdir -p build/linux-aarch64
           CXXFLAGS="-O3 -ffast-math -std=c++17" \
-          aarch64-linux-gnu-g++ $CXXFLAGS -pthread -o build/linux-aarch64/TMscoreC code/TMscoreC.cpp
+          aarch64-linux-gnu-g++ $CXXFLAGS -pthread -o build/linux-aarch64/TMscoreC-linux-aarch64 code/TMscoreC.cpp
           CXXFLAGS="-O3 -ffast-math -std=c++17" \
-          aarch64-linux-gnu-g++ $CXXFLAGS -pthread -o build/linux-aarch64/TMscoreCmt code/TMscoreCmt.cpp
+          aarch64-linux-gnu-g++ $CXXFLAGS -pthread -o build/linux-aarch64/TMscoreCmt-linux-aarch64 code/TMscoreCmt.cpp
 
       - name: Rename to requested artifact names
         run: |
           if [ "${{ matrix.arch }}" = "x86_64" ]; then
             mkdir -p dist/linux-x86
-            cp build/linux-x86_64/TMscoreC dist/linux-x86/
-            cp build/linux-x86_64/TMscoreCmt dist/linux-x86/
+            cp build/linux-x86_64/TMscoreC-linux-x86_64 dist/linux-x86/
+            cp build/linux-x86_64/TMscoreCmt-linux-x86_64 dist/linux-x86/
           else
             mkdir -p dist/linux-arm
-            cp build/linux-aarch64/TMscoreC dist/linux-arm/
-            cp build/linux-aarch64/TMscoreCmt dist/linux-arm/
+            cp build/linux-aarch64/TMscoreC-linux-aarch64 dist/linux-arm/
+            cp build/linux-aarch64/TMscoreCmt-linux-aarch64 dist/linux-arm/
           fi
 
       - name: Upload artifact (x86_64)
@@ -95,15 +95,15 @@ jobs:
         run: |
           mkdir -p build/macos-${{ matrix.arch }}
           CXXFLAGS="-O3 -ffast-math -std=c++17 -arch ${{ matrix.arch }}" \
-          clang++ $CXXFLAGS -pthread -o build/macos-${{ matrix.arch }}/TMscoreC code/TMscoreC.cpp
+          clang++ $CXXFLAGS -pthread -o build/macos-${{ matrix.arch }}/TMscoreC-macos-${{ matrix.arch }} code/TMscoreC.cpp
           CXXFLAGS="-O3 -ffast-math -std=c++17 -arch ${{ matrix.arch }}" \
-          clang++ $CXXFLAGS -pthread -o build/macos-${{ matrix.arch }}/TMscoreCmt code/TMscoreCmt.cpp
+          clang++ $CXXFLAGS -pthread -o build/macos-${{ matrix.arch }}/TMscoreCmt-macos-${{ matrix.arch }} code/TMscoreCmt.cpp
 
       - name: Prepare artifact dir
         run: |
           mkdir -p dist/${{ matrix.artifact }}
-          cp build/macos-${{ matrix.arch }}/TMscoreC dist/${{ matrix.artifact }}/
-          cp build/macos-${{ matrix.arch }}/TMscoreCmt dist/${{ matrix.artifact }}/
+          cp build/macos-${{ matrix.arch }}/TMscoreC-macos-${{ matrix.arch }} dist/${{ matrix.artifact }}/
+          cp build/macos-${{ matrix.arch }}/TMscoreCmt-macos-${{ matrix.arch }} dist/${{ matrix.artifact }}/
 
       - name: Upload artifact (macOS ${{ matrix.arch }})
         uses: actions/upload-artifact@v4
@@ -141,45 +141,16 @@ jobs:
         run: |
           mkdir -p build/win-x86
           CXXFLAGS="-O3 -ffast-math -std=gnu++17" \
-          g++ $CXXFLAGS -static-libgcc -static-libstdc++ -o build/win-x86/TMscoreC.exe code/TMscoreC.cpp
+          g++ $CXXFLAGS -static-libgcc -static-libstdc++ -o build/win-x86/TMscoreC-windows-x86.exe code/TMscoreC.cpp
           CXXFLAGS="-O3 -ffast-math -std=gnu++17" \
-          g++ $CXXFLAGS -static-libgcc -static-libstdc++ -pthread -o build/win-x86/TMscoreCmt.exe code/TMscoreCmt.cpp
+          g++ $CXXFLAGS -static-libgcc -static-libstdc++ -pthread -o build/win-x86/TMscoreCmt-windows-x86.exe code/TMscoreCmt.cpp
 
       - name: Upload artifact (Windows x86)
         if: matrix.arch == 'x86'
         uses: actions/upload-artifact@v4
         with:
           name: win-x86
-          path: build/win-x86/*
-
-      # Build ARM64 Windows using llvm-mingw (cross-compile on x64 runner)
-      - name: Download llvm-mingw (cross toolchain)
-        if: matrix.arch == 'arm64'
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $version = '20240512'
-          $zip = "llvm-mingw-$version-msvcrt-x86_64.zip"
-          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$version/$zip"
-          Invoke-WebRequest -Uri $url -OutFile $zip
-          Expand-Archive $zip -DestinationPath $PWD
-          echo "${PWD}\llvm-mingw-$version-msvcrt-x86_64\bin" | Out-File -FilePath $Env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Build (Windows ARM64 using aarch64-w64-mingw32-g++)
-        if: matrix.arch == 'arm64'
-        shell: powershell
-        run: |
-          New-Item -ItemType Directory -Path build/win-arm -Force | Out-Null
-          $env:CXXFLAGS = '-O3 -ffast-math -std=gnu++17'
-          aarch64-w64-mingw32-g++ $env:CXXFLAGS -static-libgcc -static-libstdc++ -o build/win-arm/TMscoreC.exe code/TMscoreC.cpp
-          aarch64-w64-mingw32-g++ $env:CXXFLAGS -static-libgcc -static-libstdc++ -pthread -o build/win-arm/TMscoreCmt.exe code/TMscoreCmt.cpp
-
-      - name: Upload artifact (Windows ARM64)
-        if: matrix.arch == 'arm64'
-        uses: actions/upload-artifact@v4
-        with:
-          name: win-arm
-          path: build/win-arm/*
+          path: build/win-x86/
 
   release:
     name: publish-release
@@ -219,11 +190,6 @@ jobs:
           name: win-x86
           path: release/win-x86
 
-      - name: Download artifact win-arm
-        uses: actions/download-artifact@v4
-        with:
-          name: win-arm
-          path: release/win-arm
 
       - name: Install zip
         run: |
@@ -238,7 +204,11 @@ jobs:
           zip -j TM-score-Comp-macos-apple-silicon.zip macos-apple-silicon/*
           zip -j TM-score-Comp-macos-x86.zip macos-x86/*
           zip -j TM-score-Comp-win-x86.zip win-x86/*
-          zip -j TM-score-Comp-win-arm.zip win-arm/*
+          
+          # Create a complete package with all binaries
+          mkdir -p all-platforms
+          cp -r linux-x86/* macos-apple-silicon/* macos-x86/* win-x86/* all-platforms/
+          zip -j TM-score-Comp-all-platforms.zip all-platforms/*
 
       - name: Create GitHub Release and upload assets
         uses: softprops/action-gh-release@v2
@@ -249,5 +219,5 @@ jobs:
             release/TM-score-Comp-macos-apple-silicon.zip
             release/TM-score-Comp-macos-x86.zip
             release/TM-score-Comp-win-x86.zip
-            release/TM-score-Comp-win-arm.zip
+            release/TM-score-Comp-all-platforms.zip
           generate_release_notes: true

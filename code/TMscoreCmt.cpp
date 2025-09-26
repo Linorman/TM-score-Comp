@@ -17,8 +17,11 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#elif defined(__linux__) || defined(__APPLE__)
+#elif defined(__linux__)
 #include <sys/sysinfo.h>
+#elif defined(__APPLE__)
+#include <sys/types.h>
+#include <sys/sysctl.h>
 #endif
 
 using namespace std;
@@ -119,10 +122,17 @@ class CSystem{
 		    SYSTEM_INFO sysinfo;
 		    GetSystemInfo(&sysinfo);
 		    return sysinfo.dwNumberOfProcessors;
-		#elif defined(__linux__) || defined(__APPLE__)
+		#elif defined(__linux__)
 		    return get_nprocs();
+		#elif defined(__APPLE__)
+		    int cpu_count;
+		    size_t size = sizeof(cpu_count);
+		    if (sysctlbyname("hw.ncpu", &cpu_count, &size, NULL, 0) == 0) {
+		        return cpu_count;
+		    }
+		    return std::thread::hardware_concurrency();
 		#else
-		    return -1; // Unsupported system
+		    return std::thread::hardware_concurrency();
 		#endif
 		}
 };

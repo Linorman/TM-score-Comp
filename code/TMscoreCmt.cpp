@@ -1,5 +1,6 @@
 #include <iostream>
 #include <string.h>
+#include <stdio.h>
 #include <vector>
 #include <string>
 #include <fstream>
@@ -4068,7 +4069,7 @@ inline void CTMscoreComplex::generate_residue_alignment_of_each_molecule_pair_us
 			const vector<int>& aoind = ai->get_orig_index_vec();
 			const vector<int>& boind = bi->get_orig_index_vec();
 			
-			sprintf(buf, "%d", amt);
+			snprintf(buf, sizeof(buf), "%d", amt);
 			string* key = new string(buf + aseq + "$" + bseq);
 			if (is_similar_q2t_for_macromol.end() == is_similar_q2t_for_macromol.find(*key)){
 				is_similar_q2t_for_macromol[*key] = NULL;
@@ -4181,7 +4182,7 @@ inline void CTMscoreComplex::generate_residue_alignment_of_each_molecule_pair_us
 			const MOLTYPE& amt = ai->get_moltype();
 			
 			if (LIGAND != amt){
-				sprintf(buf, "%d", amt);
+				snprintf(buf, sizeof(buf), "%d", amt);
 				string* key = new string(buf + aseq);
 				if (as.end() == as.find(*key)){
 					as[*key] = 'X';
@@ -4201,7 +4202,7 @@ inline void CTMscoreComplex::generate_residue_alignment_of_each_molecule_pair_us
 			const MOLTYPE& bmt = bi->get_moltype();
 			
 			if (LIGAND != bmt){
-				sprintf(buf, "%d", bmt);
+				snprintf(buf, sizeof(buf), "%d", bmt);
 				string* key = new string(buf + bseq);
 				if (bs.end() == bs.find(*key)){
 					bs[*key] = 'X';	
@@ -8950,15 +8951,21 @@ inline double CBaseFunc::__3merExchangedSearch(double** scoMtx, const int& rownu
 					transpose_alivec[kth_exchange_col_ind] = -1;
 				}
 				
-				if (-1 != kth_exchange_row_ind)
-					if (-1 == col_ind || scoMtx[kth_exchange_row_ind][col_ind] <= 1e-9)
+				if (-1 != kth_exchange_row_ind){
+					if (-1 == col_ind || scoMtx[kth_exchange_row_ind][col_ind] <= 1e-9){
 						alivec[kth_exchange_row_ind] = -1;
-					else alivec[kth_exchange_row_ind] = col_ind;
-						
-				if (-1 != col_ind)
-					if (-1 == kth_exchange_row_ind || scoMtx[kth_exchange_row_ind][col_ind] <= 1e-9)
+					}else{
+						alivec[kth_exchange_row_ind] = col_ind;
+					}
+				}
+
+				if (-1 != col_ind){
+					if (-1 == kth_exchange_row_ind || scoMtx[kth_exchange_row_ind][col_ind] <= 1e-9){
 						transpose_alivec[col_ind] = -1;
-					else transpose_alivec[col_ind] = kth_exchange_row_ind;
+					}else{
+						transpose_alivec[col_ind] = kth_exchange_row_ind;
+					}
+				}
 				
 //					System.out.println("=============================================================");
 //					double sum = 0;
@@ -9488,9 +9495,11 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__(
 											fast);
 	}
 	
-	for (auto& thread : threads){
-		if (thread.joinable())
-			thread.join();
+	for (size_t thread_ind = 0; thread_ind < threads.size(); ++thread_ind){
+		thread& th = threads[thread_ind];
+		if (th.joinable()){
+			th.join();
+		}
 	}
 	
 	int max_index = CSort::find_max_index(n_init, score_max_arr);
@@ -9681,9 +9690,11 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__II(
 											fast);
 	}
 	
-	for (auto& thread : threads){
-		if (thread.joinable())
-			thread.join();
+	for (size_t thread_ind = 0; thread_ind < threads.size(); ++thread_ind){
+		thread& th = threads[thread_ind];
+		if (th.joinable()){
+			th.join();
+		}
 	}
 	
 	int max_index = CSort::find_max_index(n_init, score_max_arr);
@@ -10063,9 +10074,11 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__(const vector<double*
 											fast);
 	}
 	
-	for (auto& thread : threads){
-		if (thread.joinable())
-			thread.join();
+	for (size_t thread_ind = 0; thread_ind < threads.size(); ++thread_ind){
+		thread& th = threads[thread_ind];
+		if (th.joinable()){
+			th.join();
+		}
 	}
 	
 	int max_index = CSort::find_max_index(n_init, score_max_arr);
@@ -10474,9 +10487,11 @@ inline double CBaseFunc::cal_rot_tran_from_query_to_templ__for_rTMscore(
 									fast);
 	}
 	
-	for (auto& thread : threads){
-		if (thread.joinable())
-			thread.join();
+	for (size_t thread_ind = 0; thread_ind < threads.size(); ++thread_ind){
+		thread& th = threads[thread_ind];
+		if (th.joinable()){
+			th.join();
+		}
 	}
 	
 	int max_index = CSort::find_max_index(n_init, score_max_arr);
@@ -11561,9 +11576,9 @@ inline const vector<string> Molecule::to_str(double** u, double* t){
 		oxyz = m_all_xyz_vec[i];
 		nxyz = CBaseFunc::rotateAndTrans(oxyz, u, t);
 
-		sprintf(xstr, "%8.3f", nxyz[0]);
-		sprintf(ystr, "%8.3f", nxyz[1]);
-		sprintf(zstr, "%8.3f", nxyz[2]);
+		snprintf(xstr, sizeof(xstr), "%8.3f", nxyz[0]);
+		snprintf(ystr, sizeof(ystr), "%8.3f", nxyz[1]);
+		snprintf(zstr, sizeof(zstr), "%8.3f", nxyz[2]);
 		
 		ans.push_back(oinfo.substr(0, 30) + xstr + ystr + zstr + oinfo.substr(54));
 		delete[] nxyz;
@@ -11916,22 +11931,22 @@ inline void CTMscoreComplex::save_superposition_ditances(const string& savepath)
 		double dis = sqrt(ap.dis2);
 		
 		if (dis < 10.){
-			sprintf(buf, "%4d    %10s    %5d%c   %3s    %8.6f    %10s    %5d%c   %3s", 
+			snprintf(buf, sizeof(buf), "%4d    %10s    %5d%c   %3s    %8.6f    %10s    %5d%c   %3s", 
 					i+1, ap.qchain.c_str(), ap.qoind, ap.qoindsuf, ap.qaa.c_str(), dis, ap.tchain.c_str(), ap.toind, ap.toindsuf, ap.taa.c_str());			
 		}else if (dis < 100){
-			sprintf(buf, "%4d    %10s    %5d%c   %3s    %8.5f    %10s    %5d%c   %3s", 
+			snprintf(buf, sizeof(buf), "%4d    %10s    %5d%c   %3s    %8.5f    %10s    %5d%c   %3s", 
 					i+1, ap.qchain.c_str(), ap.qoind, ap.qoindsuf, ap.qaa.c_str(), dis, ap.tchain.c_str(), ap.toind, ap.toindsuf, ap.taa.c_str());			
 		}else if (dis < 1000){
-			sprintf(buf, "%4d    %10s    %5d%c   %3s    %8.4f    %10s    %5d%c   %3s", 
+			snprintf(buf, sizeof(buf), "%4d    %10s    %5d%c   %3s    %8.4f    %10s    %5d%c   %3s", 
 					i+1, ap.qchain.c_str(), ap.qoind, ap.qoindsuf, ap.qaa.c_str(), dis, ap.tchain.c_str(), ap.toind, ap.toindsuf, ap.taa.c_str());			
 		}else if (dis < 10000){
-			sprintf(buf, "%4d    %10s    %5d%c   %3s    %8.3f    %10s    %5d%c   %3s", 
+			snprintf(buf, sizeof(buf), "%4d    %10s    %5d%c   %3s    %8.3f    %10s    %5d%c   %3s", 
 					i+1, ap.qchain.c_str(), ap.qoind, ap.qoindsuf, ap.qaa.c_str(), dis, ap.tchain.c_str(), ap.toind, ap.toindsuf, ap.taa.c_str());			
 		}else if (dis < 100000){
-			sprintf(buf, "%4d    %10s    %5d%c   %3s    %8.2f    %10s    %5d%c   %3s", 
+			snprintf(buf, sizeof(buf), "%4d    %10s    %5d%c   %3s    %8.2f    %10s    %5d%c   %3s", 
 					i+1, ap.qchain.c_str(), ap.qoind, ap.qoindsuf, ap.qaa.c_str(), dis, ap.tchain.c_str(), ap.toind, ap.toindsuf, ap.taa.c_str());			
 		}else if (dis < 1000000){
-			sprintf(buf, "%4d    %10s    %5d%c   %3s    %8.1f    %10s    %5d%c   %3s", 
+			snprintf(buf, sizeof(buf), "%4d    %10s    %5d%c   %3s    %8.1f    %10s    %5d%c   %3s", 
 					i+1, ap.qchain.c_str(), ap.qoind, ap.qoindsuf, ap.qaa.c_str(), dis, ap.tchain.c_str(), ap.toind, ap.toindsuf, ap.taa.c_str());			
 		}
 		
@@ -12056,7 +12071,7 @@ inline void CTMscoreComplex::print_result(){
 	char buf[5000];
 	cout << "Information of Structure 1: " << endl;
 	if (0 != qpro_num){
-		sprintf(buf, "  >Protein number: %d, amino acid number: %d, protein chain/molecule(s): ", qpro_num, qprot_aanum_in_tot);
+		snprintf(buf, sizeof(buf), "  >Protein number: %d, amino acid number: %d, protein chain/molecule(s): ", qpro_num, qprot_aanum_in_tot);
 		int spacenum = strlen(buf);
 		cout << buf << qpro_chains[0] << " (" << qpro_aanums[0] << " a.a.)" << endl;
 		for (i = 0; i < spacenum; i++)
@@ -12069,7 +12084,7 @@ inline void CTMscoreComplex::print_result(){
 		}
 	} 
 	if (0 != qdna_num){
-		sprintf(buf, "  >DNA number: %d, base pair number: %d, DNA chain/molecule(s): ", qdna_num, qdna_ntnum_in_tot);
+		snprintf(buf, sizeof(buf), "  >DNA number: %d, base pair number: %d, DNA chain/molecule(s): ", qdna_num, qdna_ntnum_in_tot);
 		int spacenum = strlen(buf);
 		cout << buf << qdna_chains[0] << " (" << qdna_nucnums[0] << " bp)" << endl;
 		for (i = 0; i < spacenum; i++)
@@ -12082,7 +12097,7 @@ inline void CTMscoreComplex::print_result(){
 		}
 	} 
 	if (0 != qrna_num){
-		sprintf(buf, "  >RNA number: %d, nucletide number: %d, RNA chain/molecule(s): ", qrna_num, qrna_ntnum_in_tot);
+		snprintf(buf, sizeof(buf), "  >RNA number: %d, nucletide number: %d, RNA chain/molecule(s): ", qrna_num, qrna_ntnum_in_tot);
 		int spacenum = strlen(buf);
 		cout << buf << qrna_chains[0] << " (" << qrna_nucnums[0] << " nt)" << endl;
 		for (i = 0; i < spacenum; i++)
@@ -12095,7 +12110,7 @@ inline void CTMscoreComplex::print_result(){
 		}
 	}
 	if (0 != qlig_num){
-		sprintf(buf, "  >Ligand number: %d, heavy atom number: %d, Ligand molecule(s): ", qlig_num, qlig_atnum_in_tot);
+		snprintf(buf, sizeof(buf), "  >Ligand number: %d, heavy atom number: %d, Ligand molecule(s): ", qlig_num, qlig_atnum_in_tot);
 		int spacenum = strlen(buf);
 		cout << buf << qlig_types[0] << " (" << qlig_atnums[0] << " atoms)" << endl;
 		for (i = 0; i < spacenum; i++)
@@ -12110,7 +12125,7 @@ inline void CTMscoreComplex::print_result(){
 	cout << endl;
 	cout << "Information of Structure 2: " << endl;
 	if (0 != tpro_num){
-		sprintf(buf, "  >Protein number: %d, amino acid number: %d, protein chain/molecule(s): ", tpro_num, tprot_aanum_in_tot);
+		snprintf(buf, sizeof(buf), "  >Protein number: %d, amino acid number: %d, protein chain/molecule(s): ", tpro_num, tprot_aanum_in_tot);
 		int spacenum = strlen(buf);
 		cout << buf << tpro_chains[0] << " (" << tpro_aanums[0] << " a.a.)" << endl;
 		for (i = 0; i < spacenum; i++)
@@ -12123,7 +12138,7 @@ inline void CTMscoreComplex::print_result(){
 		}
 	}
 	if (0 != tdna_num){
-		sprintf(buf, "  >DNA number: %d, base pair number: %d, DNA chain/molecule(s): ", tdna_num, tdna_ntnum_in_tot);
+		snprintf(buf, sizeof(buf), "  >DNA number: %d, base pair number: %d, DNA chain/molecule(s): ", tdna_num, tdna_ntnum_in_tot);
 		int spacenum = strlen(buf);
 		cout << buf << tdna_chains[0] << " (" << tdna_nucnums[0] << " bp)" << endl;
 		for (i = 0; i < spacenum; i++)
@@ -12136,7 +12151,7 @@ inline void CTMscoreComplex::print_result(){
 		}
 	} 
 	if (0 != trna_num){
-		sprintf(buf, "  >RNA number: %d, nucletide number: %d, RNA chain/molecule(s): ", trna_num, trna_ntnum_in_tot);
+		snprintf(buf, sizeof(buf), "  >RNA number: %d, nucletide number: %d, RNA chain/molecule(s): ", trna_num, trna_ntnum_in_tot);
 		int spacenum = strlen(buf);
 		cout << buf << trna_chains[0] << " (" << trna_nucnums[0] << " nt)" << endl;
 		for (i = 0; i < spacenum; i++)
@@ -12149,7 +12164,7 @@ inline void CTMscoreComplex::print_result(){
 		}
 	}
 	if (0 != tlig_num){
-		sprintf(buf, "  >Ligand number: %d, heavy atom number: %d, Ligand molecules: ", tlig_num, tlig_atnum_in_tot);
+		snprintf(buf, sizeof(buf), "  >Ligand number: %d, heavy atom number: %d, Ligand molecules: ", tlig_num, tlig_atnum_in_tot);
 		int spacenum = strlen(buf);
 		cout << buf << tlig_types[0] << " (" << tlig_atnums[0] << " atoms)" << endl;
 		for (i = 0; i < spacenum; i++)
@@ -12203,7 +12218,7 @@ inline void CTMscoreComplex::print_result(){
 	for (i = 0; i < qsize; i++){
 		if (-1 != obj_level_ali[i]){
 			double individual_tmsco = this->individual_tmscore_mtx[i][obj_level_ali[i]];
-			sprintf(buf, "  >TM-score between %s(in Structure 1) and %s(in Structure 2): %8.6f", query->get_chain(i).c_str(), templ->get_chain( obj_level_ali[i]).c_str(), individual_tmsco);
+			snprintf(buf, sizeof(buf), "  >TM-score between %s(in Structure 1) and %s(in Structure 2): %8.6f", query->get_chain(i).c_str(), templ->get_chain( obj_level_ali[i]).c_str(), individual_tmsco);
 			cout << buf << endl; 
 		}
 	}
@@ -12214,7 +12229,7 @@ inline void CTMscoreComplex::print_result(){
 		if (-1 != obj_level_ali[i]){
 			double tmsco = chain_tmscore[query->get_chain(i)];
 			int num = this->chain_index_corr_to_query__aa_num[i];
-			sprintf(buf, "  >TM-score between %s(in Structure 1) and %s(in Structure 2): %8.6f", query->get_chain(i).c_str(), templ->get_chain( obj_level_ali[i]).c_str(), tmsco/num);
+			snprintf(buf, sizeof(buf), "  >TM-score between %s(in Structure 1) and %s(in Structure 2): %8.6f", query->get_chain(i).c_str(), templ->get_chain( obj_level_ali[i]).c_str(), tmsco/num);
 			cout << buf << endl; 
 			
 			chain_tmscore[query->get_chain(i)] = tmsco/num;
@@ -12242,12 +12257,12 @@ inline void CTMscoreComplex::print_result(){
 		rTM = i/rTM;
 		
 		corr_rTM_of_max_rTM_level = rTM;
-		sprintf(buf, "  >rTM-score(%d): %8.6f", i, rTM);
+		snprintf(buf, sizeof(buf), "  >rTM-score(%d): %8.6f", i, rTM);
 		cout << buf << endl; 
 	}
 	n = query->size();
 	for (; i <= n; i++){
-		sprintf(buf, "  >rTM-score(%d): %8.6f", i, 0.);
+		snprintf(buf, sizeof(buf), "  >rTM-score(%d): %8.6f", i, 0.);
 		cout << buf << endl; 
 	}
 	delete[] sinds;
@@ -12258,15 +12273,15 @@ inline void CTMscoreComplex::print_result(){
 	double itmscore = calcluate_itmscore(g_interact_dis_cut_pow2);
 	if (0 > itmscore){
 		if (is_all_qchain_matched)
-			sprintf(buf, "  >TM-score: %8.6f, rTM-score: %8.6f, iTM-score: n/a", tmscore, rtmscore);
-		else sprintf(buf, "  >TM-score: %8.6f, rTM-score: n/a, iTM-score: n/a", tmscore);
+			snprintf(buf, sizeof(buf), "  >TM-score: %8.6f, rTM-score: %8.6f, iTM-score: n/a", tmscore, rtmscore);
+		else snprintf(buf, sizeof(buf), "  >TM-score: %8.6f, rTM-score: n/a, iTM-score: n/a", tmscore);
 		cout << buf << endl;
 	}else {
 		if (is_all_qchain_matched){
-			sprintf(buf, "  >TM-score: %8.6f, rTM-score: %8.6f, iTM-score: %8.6f", tmscore, rtmscore, itmscore);
+			snprintf(buf, sizeof(buf), "  >TM-score: %8.6f, rTM-score: %8.6f, iTM-score: %8.6f", tmscore, rtmscore, itmscore);
 			cout << buf << endl;
 		}else{
-			sprintf(buf, "  >TM-score: %8.6f, rTM-score: n/a, iTM-score: %8.6f", tmscore, itmscore);
+			snprintf(buf, sizeof(buf), "  >TM-score: %8.6f, rTM-score: n/a, iTM-score: %8.6f", tmscore, itmscore);
 			cout << buf << endl;
 		} 
 	}
